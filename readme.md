@@ -59,7 +59,8 @@ subway-surfers-3d/
 |   ├── glow.vert / .frag
 |   └── outline.vert / .frag
 ├── release/
-│   └── readme.txt                ← Hướng dẫn chạy (dành cho file nộp)
+│   └── readme.txt
+│   └── index.html
 │
 └── doc/
     └── BaoCao.md            
@@ -67,52 +68,7 @@ subway-surfers-3d/
 
 ---
 
-## 🎓 ĐÁP ỨNG YÊU CẦU MÔN ĐHMT
 
-| Yêu cầu | File thực hiện | Cách đáp ứng |
-|---------|---------------|-------------|
-| Hình hộp (Box) | `entities/Obstacle.js`, `Player.js` | Chướng ngại vật, thân nhân vật |
-| Hình cầu (Sphere) | `entities/Coin.js`, `Player.js` | Xu vàng, đầu nhân vật |
-| Hình nón (Cone) | `entities/Obstacle.js` | Nón giao thông |
-| Hình trụ (Cylinder) | `Player.js`, `Obstacle.js` | Tay chân nhân vật, cột chướng ngại |
-| Bánh xe (Torus) | `entities/Environment.js` | TorusGeometry cho bánh xe tàu |
-| Ấm trà (Teapot) | `utils/GeometryBuilder.js` | Custom Bezier hoặc load OBJ |
-| Load model từ file | `utils/GeometryBuilder.js` | OBJLoader / GLTFLoader |
-| Chiếu phối cảnh | `managers/CameraController.js` | PerspectiveCamera (FOV/near/far) |
-| Tịnh tiến | tất cả entities | `position.x/y/z` + keyboard |
-| Quay | `Coin.js`, `Player.js` | `rotation.x/y/z` animation |
-| Tỉ lệ | `Player.js` (khi slide) | `scale.y` thay đổi |
-| Ánh sáng môi trường | `managers/LightingManager.js` | `THREE.AmbientLight` |
-| Ánh sáng định hướng | `managers/LightingManager.js` | `THREE.DirectionalLight` (mặt trời) |
-| Ánh sáng điểm | `LightingManager.js`, `Coin.js` | `THREE.PointLight` |
-| Bóng đổ | `managers/LightingManager.js` | `shadowMap = PCFSoftShadowMap` |
-| Texture mapping | `utils/TextureGenerator.js` | Canvas2D → THREE.CanvasTexture |
-| Animation | `Player.js`, tất cả managers | requestAnimationFrame game loop |
-
----
-
-## 🚀 CÁCH CHẠY
-
-> ⚠️ KHÔNG thể double-click mở index.html trực tiếp (ES Modules cần HTTP server)
-
-**Cách 1 – VS Code Live Server (dễ nhất):**
-```
-Cài extension "Live Server" → Click phải index.html → Open with Live Server
-```
-
-**Cách 2 – Python:**
-```bash
-cd subway-surfers-3d
-python -m http.server 8080
-# Mở: http://localhost:8080
-```
-
-**Cách 3 – Node.js:**
-```bash
-npx serve subway-surfers-3d
-```
-
----
 
 ## 🎮 ĐIỀU KHIỂN
 
