@@ -10,8 +10,9 @@
 
 ```
 subway-surfers-3d/
-├── index.html                    ← Điểm vào duy nhất (mở file này để chạy)
-├── README.md                     ← File này
+├── index.html
+├── style.css                 
+├── README.md                     
 │
 ├── src/
 │   ├── main.js                   ← Khởi động game, gắn canvas vào DOM
@@ -44,15 +45,24 @@ subway-surfers-3d/
 │       ├── UIManager.js          ← HUD score/lives/speed, Menu, GameOver screen
 │       └── DebugPanel.js         ← Panel thông số camera & ánh sáng (F1 bật/tắt)
 │
-├── assets/
-│   ├── textures/                 ← Thêm ảnh .png/.jpg tùy chỉnh vào đây
-│   └── models/                   ← Thêm file .obj/.gltf vào đây
-│
+├── textures/
+│   ├── box_texture.jpg                
+│   └── ground.jpg
+|   └── road.jpg
+|   └── coin.png               
+├── models/
+|   ├── mixi.glb
+|   └── mixi_jump.glb
+|   └── road.glb
+|   └── teapot.glb
+├── shaders/
+|   ├── glow.vert / .frag
+|   └── outline.vert / .frag
 ├── release/
 │   └── readme.txt                ← Hướng dẫn chạy (dành cho file nộp)
 │
 └── doc/
-    └── BaoCao_DoAn.md            ← Template báo cáo đồ án
+    └── BaoCao.md            
 ```
 
 ---
