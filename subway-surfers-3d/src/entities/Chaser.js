@@ -55,7 +55,7 @@ export class Chaser {
 
     updatePosition(playerMesh) {
         this.mesh.position.x = playerMesh.position.x;
-        this.mesh.position.y = 0;
+        this.mesh.position.y = 1.4;
         this.mesh.position.z = playerMesh.position.z + this.followDistance;
         this.mesh.lookAt(playerMesh.position.x, 1.5, playerMesh.position.z);
     }
