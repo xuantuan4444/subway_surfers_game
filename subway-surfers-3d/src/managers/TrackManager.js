@@ -5,10 +5,10 @@ export class TrackManager {
     constructor(scene) {
         this.scene = scene;
         this.chunks = [];
-        this.chunkLength = 30;
+        this.chunkLength = 60;
         this.numChunks = 12;
         this.laneWidth = 3;
-        this.recycleThreshold = 50;
+        this.recycleThreshold = 170;
         this.initChunks();
     }
 
@@ -24,7 +24,6 @@ export class TrackManager {
     createChunk() {
         const group = new THREE.Group();
 
-        // 1. Mặt đường
         const roadGeo = new THREE.BoxGeometry(12, 0.5, this.chunkLength);
         const roadMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
         const road = new THREE.Mesh(roadGeo, roadMat);
@@ -32,7 +31,6 @@ export class TrackManager {
         road.userData = { isGround: true, type: 'road' };
         group.add(road);
 
-        // 2. Vạch kẻ lane
         const lineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
         for (let i = 0; i < 6; i++) {
             const lineGeo = new THREE.BoxGeometry(0.2, 0.02, 1.5);
@@ -44,7 +42,6 @@ export class TrackManager {
             group.add(lineR);
         }
 
-        // 3. Tường 2 bên
         const wallGeo = new THREE.BoxGeometry(0.5, 2, this.chunkLength);
         const wallMat = new THREE.MeshStandardMaterial({ color: 0x666666 });
         const wallL = new THREE.Mesh(wallGeo, wallMat);
@@ -67,7 +64,7 @@ export class TrackManager {
     }
 
     spawnObjectsOnChunk(group) {
-        if (Math.random() > 0.65) return; // Tăng tỉ lệ có chướng ngại vật lên 65% (trước là 45%)
+        if (Math.random() > 0.65) return;
         const lanes = [0, 1, 2].sort(() => 0.5 - Math.random());
         const numObjects = Math.random() > 0.5 ? 1 : 2;
 
@@ -78,19 +75,16 @@ export class TrackManager {
             const type = Math.random();
 
             if (type < 0.15) {
-                this.spawnTrain(group, lane, zPos, false); // 15% train tĩnh
+                this.spawnTrain(group, lane, zPos, false);
             } else if (type < 0.60) {
-                this.spawnTrain(group, lane, zPos, true); // 45% train động (tăng mạnh)
+                this.spawnTrain(group, lane, zPos, true);
             } else {
-                // 🔀 Random 3 kiểu: U-Barrier (bắt buộc trượt), Barrier thấp (nhảy hoặc trượt), Block Đỏ
                 const barrierType = Math.random();
 
                 if (barrierType < 0.34) {
-                    // === U-BARRIER (Bắt buộc trượt) ===
                     const uBarrier = new THREE.Group();
                     const uMat = new THREE.MeshStandardMaterial({ color: 0xffaa00, roughness: 0.4 });
 
-                    // Hai cột trụ (giữ nguyên, đủ cao để đỡ thanh chắn)
                     const pillarGeo = new THREE.BoxGeometry(0.3, 1.4, 0.3);
                     const pillarL = new THREE.Mesh(pillarGeo, uMat);
                     pillarL.position.set(-1.1, 0.7, 0);
@@ -99,10 +93,9 @@ export class TrackManager {
                     pillarR.position.set(1.1, 0.7, 0);
                     uBarrier.add(pillarR);
 
-                    // Tấm bảng ngang - dày 2.0, đặt từ y=1.5 đến y=3.5
                     const boardGeo = new THREE.BoxGeometry(2.5, 2.0, 0.8);
                     const board = new THREE.Mesh(boardGeo, uMat);
-                    board.position.set(0, 2.5, 0); // Tâm tại y=2.5 → mép dưới 1.5, mép trên 3.5
+                    board.position.set(0, 2.5, 0);
                     board.userData = { type: 'obstacle', lane: lane, requiresSlide: true };
                     uBarrier.add(board);
 
@@ -110,7 +103,6 @@ export class TrackManager {
                     uBarrier.userData = { type: 'obstacle', lane: lane, requiresSlide: true };
                     group.add(uBarrier);
                 } else if (barrierType < 0.67) {
-                    // === BARRIER THẤP (Có thể nhảy qua hoặc trượt qua) ===
                     const dualBarrier = new THREE.Group();
                     const dualMat = new THREE.MeshStandardMaterial({ color: 0x55ccff, roughness: 0.4 });
 
@@ -122,7 +114,6 @@ export class TrackManager {
                     pillarR.position.set(1.1, 0.7, 0);
                     dualBarrier.add(pillarR);
 
-                    // Hạ thanh chắn xuống thấp hơn để player có thể nhảy qua được
                     const boardHeight = 0.8;
                     const boardY = 1.75;
                     const boardGeo = new THREE.BoxGeometry(2.5, boardHeight, 0.8);
@@ -135,7 +126,6 @@ export class TrackManager {
                     dualBarrier.userData = { type: 'obstacle', lane: lane, requiresSlide: true };
                     group.add(dualBarrier);
                 } else {
-                    // === BLOCK ĐỎ (Walkable - giữ nguyên code cũ) ===
                     const barrierWidth = 2.5;
                     const barrierHeight = 1.5;
                     const barrierLength = 1;
@@ -155,7 +145,6 @@ export class TrackManager {
         const laneX = (laneIndex - 1) * this.laneWidth;
         const trainGroup = new THREE.Group();
 
-        // Train tĩnh có ramp, train động không có ramp nhưng vẫn có nóc để nhảy lên
         const trainWidth = 2.6;
         const trainHeight = 4;
         const trainLength = 20;
@@ -183,10 +172,9 @@ export class TrackManager {
                 }
             };
         } else {
-            // Profile (mặt cắt) trong mặt phẳng (length-height), extrude theo bề rộng
             const halfLen = trainLength / 2;
-            const rampStartZ = halfLen + rampLength; // phía sau (+Z)
-            const frontZ = -halfLen; // phía trước (-Z)
+            const rampStartZ = halfLen + rampLength;
+            const frontZ = -halfLen;
 
             const profile = new THREE.Shape();
             profile.moveTo(rampStartZ, 0);
@@ -200,7 +188,6 @@ export class TrackManager {
                 bevelEnabled: false,
                 steps: 1
             });
-            // Center bề rộng quanh trục 0 và xoay để length nằm trên trục Z, width nằm trên trục X
             trainGeo.translate(0, 0, -trainWidth / 2);
             trainGeo.rotateY(-Math.PI / 2);
 
@@ -229,14 +216,14 @@ export class TrackManager {
                 movingTrain: true,
                 trainMotion: {
                     speed: THREE.MathUtils.randFloat(12, 16),
-                    distanceTraveled: 0
+                    distanceTraveled: 0,
+                    initialZ: zPos
                 }
             };
         } else {
             trainGroup.userData = { type: 'train' };
         }
 
-        // === 5. Coin trên nóc tàu ===
         if (!isMovingTrain) {
             for (let j = 0; j < 5; j++) {
                 const coinGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.1, 16);
@@ -261,6 +248,18 @@ export class TrackManager {
         }
         for (const chunk of this.chunks) {
             if (chunk.position.z > playerZ + this.recycleThreshold) {
+                let playerNearTrain = false;
+                for (const child of chunk.children) {
+                    if (child.userData?.type === 'train') {
+                        const trainWorldZ = chunk.position.z + child.position.z;
+                        if (Math.abs(trainWorldZ - playerZ) < this.chunkLength) {
+                            playerNearTrain = true;
+                            break;
+                        }
+                    }
+                }
+                if (playerNearTrain) continue;
+
                 this.clearChunkDynamicContent(chunk);
                 this.spawnObjectsOnChunk(chunk);
                 chunk.position.z = frontZ - this.chunkLength;
@@ -281,7 +280,6 @@ export class TrackManager {
     }
 
     animateCoins() {
-        // 🔥 Dùng traverse để animate coin bên trong trainGroup
         this.chunks.forEach(chunk => {
             chunk.traverse((child) => {
                 if (child.userData && child.userData.type === 'coin' && child.userData.rotateSpeed) {

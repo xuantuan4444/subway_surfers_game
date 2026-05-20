@@ -15,10 +15,10 @@ export class Game {
 
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x87CEEB);
-        this.scene.fog = new THREE.Fog(0x87CEEB, 15, 60);
+        this.scene.fog = new THREE.Fog(0x87CEEB, 15, 150);
 
         this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 200);
-        this.camera.position.set(0, 9, 8);
+        this.camera.position.set(0, 7, 8);
 
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -115,10 +115,13 @@ export class Game {
         // --- KẾT THÚC LOGIC VA CHẠM ---
 
 
-        this.camera.position.z = this.player.mesh.position.z + 10;
-        this.camera.position.y = 10;
+        const camOffset = this.player.mesh.position.y - 1;
+        const playerCamEffect = (camOffset > 0.05 ? camOffset : 0) * 0.4;
+
+        this.camera.position.z = this.player.mesh.position.z + 9;
+        this.camera.position.y = 7 + playerCamEffect;
         this.camera.position.x = this.player.mesh.position.x * 0.3;
-        this.camera.lookAt(this.player.mesh.position.x, 4, this.player.mesh.position.z - 5);
+        this.camera.lookAt(this.player.mesh.position.x, 2 + playerCamEffect, this.player.mesh.position.z - 6);
 
         this.renderer.render(this.scene, this.camera);
     }
@@ -132,7 +135,6 @@ export class Game {
         }
 
         if (hitType === 'side') {
-            // Đúng yêu cầu: hit hông lần 1 -> kích hoạt chaser; hit hông lần 2 khi đang bị đuổi -> thua
             if (this.chaser.active) {
                 this.triggerGameOver();
                 return;

@@ -4,13 +4,24 @@ export class Chaser {
     constructor(scene) {
         this.scene = scene;
         this.active = false;
-        this.maxDuration = 5.0; //  Thời gian dí tối đa
+        this.maxDuration = 5;
         this.remainingTime = 0;
-        
+
         this.mesh = this.createMesh();
         this.scene.add(this.mesh);
         this.mesh.visible = false;
+
         this.followDistance = 5;
+        this.approachSpeed = 80;
+        this.retreatSpeed = 15;
+
+        this.STATE = {
+            INACTIVE: 'inactive',
+            APPROACHING: 'approaching',
+            CHASING: 'chasing',
+            RETREATING: 'retreating'
+        };
+        this.state = this.STATE.INACTIVE;
     }
 
     createMesh() {
@@ -37,31 +48,75 @@ export class Chaser {
     activate(playerMesh) {
         this.active = true;
         this.mesh.visible = true;
-        this.remainingTime = this.maxDuration; // 🔥 Reset đồng hồ 5s
-        this.updatePosition(playerMesh);
+        this.remainingTime = this.maxDuration;
+        this.state = this.STATE.APPROACHING;
+        this.offset = 25;
+
+        this.mesh.position.x = playerMesh.position.x;
+        this.mesh.position.y = 1.4;
+        this.mesh.position.z = playerMesh.position.z + this.followDistance + this.offset;
     }
 
     update(delta, playerMesh) {
-        if (!this.active) return;
-        
-        this.remainingTime -= delta;
-        this.updatePosition(playerMesh);
+        if (this.state === this.STATE.INACTIVE) return;
 
-        // 🔥 Hết thời gian dí -> Tự động biến mất
+        this.mesh.lookAt(playerMesh.position.x, 1.5, playerMesh.position.z);
+
+        switch (this.state) {
+            case this.STATE.APPROACHING:
+                this.updateApproaching(delta, playerMesh);
+                break;
+            case this.STATE.CHASING:
+                this.updateChasing(delta, playerMesh);
+                break;
+            case this.STATE.RETREATING:
+                this.updateRetreating(delta, playerMesh);
+                break;
+        }
+    }
+
+    updateApproaching(delta, playerMesh) {
+        this.offset -= this.approachSpeed * delta;
+        if (this.offset < 0) this.offset = 0;
+
+        this.mesh.position.z = playerMesh.position.z + this.followDistance + this.offset;
+        this.mesh.position.x = playerMesh.position.x;
+
+        if (this.offset <= 0) {
+            this.state = this.STATE.CHASING;
+        }
+    }
+
+    updateChasing(delta, playerMesh) {
+        this.remainingTime -= delta;
+
+        const targetZ = playerMesh.position.z + this.followDistance;
+        const diff = targetZ - this.mesh.position.z;
+        this.mesh.position.z += diff * Math.min(1, 15 * delta);
+        this.mesh.position.x = playerMesh.position.x;
+
         if (this.remainingTime <= 0) {
+            this.active = false;
+            this.offset = this.mesh.position.z - playerMesh.position.z;
+            this.state = this.STATE.RETREATING;
+        }
+    }
+
+    updateRetreating(delta, playerMesh) {
+        this.offset += this.retreatSpeed * delta;
+        if (this.offset > 30) this.offset = 30;
+
+        this.mesh.position.z = playerMesh.position.z + this.offset;
+        this.mesh.position.x = playerMesh.position.x;
+
+        if (this.offset >= 30) {
             this.deactivate();
         }
     }
 
-    updatePosition(playerMesh) {
-        this.mesh.position.x = playerMesh.position.x;
-        this.mesh.position.y = 1.4;
-        this.mesh.position.z = playerMesh.position.z + this.followDistance;
-        this.mesh.lookAt(playerMesh.position.x, 1.5, playerMesh.position.z);
-    }
-
     deactivate() {
         this.active = false;
+        this.state = this.STATE.INACTIVE;
         this.mesh.visible = false;
     }
 }

@@ -74,7 +74,6 @@ export class Player {
     slide() {
         if (this.isJumping) {
             this.isJumping = false;
-            this.verticalVelocity = -25;
         }
         if (!this.isSliding && !this.returningToLane) {
             this.isSliding = true;
@@ -171,12 +170,13 @@ export class Player {
                 this.isJumping = false;
                 this.verticalVelocity = 0;
             }
-        } else {
+        } else if (!this.isSliding) {
             const diff = targetY - this.mesh.position.y;
-            if (Math.abs(diff) < 0.4) {
+            if (Math.abs(diff) < 0.1) {
                 this.mesh.position.y = targetY;
             } else {
-                this.mesh.position.y += diff * Math.min(1, 20 * delta);
+                const speed = diff > 0 ? 40 : 6;
+                this.mesh.position.y += diff * Math.min(1, speed * delta);
             }
         }
 
