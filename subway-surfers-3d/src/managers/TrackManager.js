@@ -72,25 +72,71 @@ export class TrackManager {
             if (type < 0.2) {
                 this.spawnTrain(group, lane, zPos);
             } else if (type > 0.5) {
-                // Block đỏ (walkable): có thể đứng trên nóc (chỉ bằng nhảy)
-                const barrierWidth = 2.5;
-                const barrierHeight = 1.5;
-                const barrierLength = 1;
-                const barrierGeo = new THREE.BoxGeometry(barrierWidth, barrierHeight, barrierLength);
-                const barrierMat = new THREE.MeshStandardMaterial({ color: 0xff3333 });
+                // 🔀 Random 3 kiểu: U-Barrier (bắt buộc trượt), Barrier thấp (nhảy hoặc trượt), Block Đỏ
+                const barrierType = Math.random();
 
-                const barrier = new THREE.Mesh(barrierGeo, barrierMat);
-                barrier.position.set(xPos, barrierHeight / 2, zPos);
-                barrier.userData = { type: 'obstacle', lane: lane, isWalkable: true };
-                group.add(barrier);
-            } else {
-                const coinGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.1, 16);
-                const coinMat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.8, roughness: 0.2 });
-                const coin = new THREE.Mesh(coinGeo, coinMat);
-                coin.rotation.x = Math.PI / 2;
-                coin.position.set(xPos, 1, zPos);
-                coin.userData = { type: 'coin', lane: lane, rotateSpeed: 3 };
-                group.add(coin);
+                if (barrierType < 0.34) {
+                    // === U-BARRIER (Bắt buộc trượt) ===
+                    const uBarrier = new THREE.Group();
+                    const uMat = new THREE.MeshStandardMaterial({ color: 0xffaa00, roughness: 0.4 });
+
+                    // Hai cột trụ (giữ nguyên, đủ cao để đỡ thanh chắn)
+                    const pillarGeo = new THREE.BoxGeometry(0.3, 1.4, 0.3);
+                    const pillarL = new THREE.Mesh(pillarGeo, uMat);
+                    pillarL.position.set(-1.1, 0.7, 0);
+                    uBarrier.add(pillarL);
+                    const pillarR = pillarL.clone();
+                    pillarR.position.set(1.1, 0.7, 0);
+                    uBarrier.add(pillarR);
+
+                    // Tấm bảng ngang - dày 2.0, đặt từ y=1.5 đến y=3.5
+                    const boardGeo = new THREE.BoxGeometry(2.5, 2.0, 0.8);
+                    const board = new THREE.Mesh(boardGeo, uMat);
+                    board.position.set(0, 2.5, 0); // Tâm tại y=2.5 → mép dưới 1.5, mép trên 3.5
+                    board.userData = { type: 'obstacle', lane: lane, requiresSlide: true };
+                    uBarrier.add(board);
+
+                    uBarrier.position.set(xPos, 0, zPos);
+                    uBarrier.userData = { type: 'obstacle', lane: lane, requiresSlide: true };
+                    group.add(uBarrier);
+                } else if (barrierType < 0.67) {
+                    // === BARRIER THẤP (Có thể nhảy qua hoặc trượt qua) ===
+                    const dualBarrier = new THREE.Group();
+                    const dualMat = new THREE.MeshStandardMaterial({ color: 0x55ccff, roughness: 0.4 });
+
+                    const pillarGeo = new THREE.BoxGeometry(0.3, 1.4, 0.3);
+                    const pillarL = new THREE.Mesh(pillarGeo, dualMat);
+                    pillarL.position.set(-1.1, 0.7, 0);
+                    dualBarrier.add(pillarL);
+                    const pillarR = pillarL.clone();
+                    pillarR.position.set(1.1, 0.7, 0);
+                    dualBarrier.add(pillarR);
+
+                    // Hạ thanh chắn xuống thấp hơn để player có thể nhảy qua được
+                    const boardHeight = 0.8;
+                    const boardY = 1.75;
+                    const boardGeo = new THREE.BoxGeometry(2.5, boardHeight, 0.8);
+                    const board = new THREE.Mesh(boardGeo, dualMat);
+                    board.position.set(0, boardY, 0);
+                    board.userData = { type: 'obstacle', lane: lane, requiresSlide: true };
+                    dualBarrier.add(board);
+
+                    dualBarrier.position.set(xPos, 0, zPos);
+                    dualBarrier.userData = { type: 'obstacle', lane: lane, requiresSlide: true };
+                    group.add(dualBarrier);
+                } else {
+                    // === BLOCK ĐỎ (Walkable - giữ nguyên code cũ) ===
+                    const barrierWidth = 2.5;
+                    const barrierHeight = 1.5;
+                    const barrierLength = 1;
+                    const barrierGeo = new THREE.BoxGeometry(barrierWidth, barrierHeight, barrierLength);
+                    const barrierMat = new THREE.MeshStandardMaterial({ color: 0xff3333 });
+
+                    const barrier = new THREE.Mesh(barrierGeo, barrierMat);
+                    barrier.position.set(xPos, barrierHeight / 2, zPos);
+                    barrier.userData = { type: 'obstacle', lane: lane, isWalkable: true };
+                    group.add(barrier);
+                }
             }
         }
     }

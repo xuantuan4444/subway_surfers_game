@@ -59,7 +59,12 @@ export class CollisionManager {
                 }
 
                 // type === 'obstacle'
+                if (data.requiresSlide && player.isSliding) {
+                    continue;
+                }
+
                 const playerBottomY = this.playerBox.min.y;
+
                 const objectTopY = this.objectBox.max.y;
 
                 const isFalling = (player.verticalVelocity ?? 0) <= 0;
@@ -76,8 +81,15 @@ export class CollisionManager {
                         typeof player.targetX === 'number' &&
                         Math.abs(player.targetX - player.mesh.position.x) > 0.05;
 
+                    const isOnTrain = (player.trainGraceTimer ?? 0) > 0;
+
+                    // Khi đang đổi lane trên train, bỏ qua mọi va chạm train để cho phép chuyển sang train kế bên.
+                    if (isChangingLane && isOnTrain) {
+                        continue;
+                    }
+
                     const isGraceTrain =
-                        (player.trainGraceTimer ?? 0) > 0 &&
+                        isOnTrain &&
                         player.trainGraceTrainUuid === obj.uuid;
 
                     // Only treat as "standing on" when player is reasonably inside the train width
@@ -90,9 +102,10 @@ export class CollisionManager {
                     const height = profile.trainHeight ?? 0;
 
                     // 1) Đổi lane trên nóc tàu: bỏ qua va chạm để player rớt xuống tự nhiên
-                    // 2) Đi hết tàu (qua mép trước -Z): vẫn còn AABB overlap trong 1-2 frame => bỏ qua để không chết oan
+                    // 2) Đổi lane trên ramp/nóc tàu: bỏ qua va chạm để không bị chaser kích hoạt oan
+                    // 3) Đi hết tàu (qua mép trước -Z): vẫn còn AABB overlap trong 1-2 frame => bỏ qua để không chết oan
                     if (isGraceTrain) {
-                        if (isChangingLane && localPos.z >= -halfLen && localPos.z <= halfLen) {
+                        if (isChangingLane && localPos.z >= -halfLen && localPos.z <= halfLen + rampLen) {
                             continue;
                         }
                         if (localPos.z < -halfLen) {
