@@ -84,8 +84,8 @@ export class Game {
         requestAnimationFrame(() => this.animate());
         const delta = this.clock.getDelta();
         
+        this.track.update(delta, this.player.mesh.position.z);
         this.player.update(delta, this.track.chunks);
-        this.track.update(this.player.mesh.position.z);
         // this.track.animateCoins(); // CoinManager sẽ quản lý coin
 
         // Cập nhật Chaser mỗi frame

@@ -95,6 +95,8 @@ export class Player {
     updateGroundObjects(trackChunks) {
         this.groundObjects = [];
         for (const chunk of trackChunks) {
+            // 🔥 Cập nhật world matrix để raycast detect đúng vị trí, đặc biệt cho train động
+            chunk.updateWorldMatrix(true, true);
             chunk.traverse((child) => {
                 // Bao gồm: mặt đường (isGround), nóc/dốc tàu (isGround), và block đỏ (isWalkable)
                 if (child.userData && (child.userData.isGround === true || child.userData.isWalkable === true)) {

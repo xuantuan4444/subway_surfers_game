@@ -26,7 +26,6 @@ export class CollisionManager {
         let hitLane = null;
 
         outer: for (const chunk of trackChunks) {
-            if (Math.abs(chunk.position.z - player.mesh.position.z) > 40) continue;
 
             // Đảm bảo matrixWorld của chunk & con được cập nhật trước khi tính Box3/worldToLocal
             chunk.updateWorldMatrix(true, true);
@@ -161,8 +160,17 @@ export class CollisionManager {
                                  Math.max(this.playerBox.min.x, this.objectBox.min.x);
                 const zOverlap = Math.min(this.playerBox.max.z, this.objectBox.max.z) -
                                  Math.max(this.playerBox.min.z, this.objectBox.min.z);
-                // Phân loại chuẩn hơn: overlap theo hướng tiến (Z) nhỏ -> đâm trực diện; ngược lại -> quệt hông
-                hitType = (zOverlap < xOverlap) ? 'front' : 'side';
+                const playerWidth = this.playerBox.max.x - this.playerBox.min.x;
+                const playerLength = this.playerBox.max.z - this.playerBox.min.z;
+                
+                let isFrontal = false;
+                if (xOverlap > playerWidth * 0.5) {
+                    isFrontal = true; // Hơn một nửa bề ngang => đâm trực diện
+                } else if (zOverlap < playerLength * 0.5 && zOverlap < xOverlap) {
+                    isFrontal = true; // Vừa chạm mặt trước góc
+                }
+                
+                hitType = isFrontal ? 'front' : 'side';
                 hitLane = data.lane ?? null;
                 break outer;
             }

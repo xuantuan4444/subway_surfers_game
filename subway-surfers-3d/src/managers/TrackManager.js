@@ -54,12 +54,20 @@ export class TrackManager {
         wallR.position.set(6.25, 1, 0);
         group.add(wallR);
 
+        group.userData.baseChildCount = group.children.length;
         this.spawnObjectsOnChunk(group);
         return group;
     }
 
+    clearChunkDynamicContent(group) {
+        const baseChildCount = group.userData?.baseChildCount ?? 0;
+        for (let i = group.children.length - 1; i >= baseChildCount; i--) {
+            group.remove(group.children[i]);
+        }
+    }
+
     spawnObjectsOnChunk(group) {
-        if (Math.random() > 0.6) return;
+        if (Math.random() > 0.65) return; // Tăng tỉ lệ có chướng ngại vật lên 65% (trước là 45%)
         const lanes = [0, 1, 2].sort(() => 0.5 - Math.random());
         const numObjects = Math.random() > 0.5 ? 1 : 2;
 
@@ -69,9 +77,11 @@ export class TrackManager {
             const zPos = -Math.random() * (this.chunkLength - 10) - 5;
             const type = Math.random();
 
-            if (type < 0.2) {
-                this.spawnTrain(group, lane, zPos);
-            } else if (type > 0.5) {
+            if (type < 0.15) {
+                this.spawnTrain(group, lane, zPos, false); // 15% train tĩnh
+            } else if (type < 0.60) {
+                this.spawnTrain(group, lane, zPos, true); // 45% train động (tăng mạnh)
+            } else {
                 // 🔀 Random 3 kiểu: U-Barrier (bắt buộc trượt), Barrier thấp (nhảy hoặc trượt), Block Đỏ
                 const barrierType = Math.random();
 
@@ -141,85 +151,133 @@ export class TrackManager {
         }
     }
 
-    spawnTrain(group, laneIndex, zPos) {
+    spawnTrain(group, laneIndex, zPos, isMovingTrain = false) {
         const laneX = (laneIndex - 1) * this.laneWidth;
         const trainGroup = new THREE.Group();
 
-        // Train là 1 mesh duy nhất: gồm ramp lên + thân tàu (dễ thay bằng model sau này)
+        // Train tĩnh có ramp, train động không có ramp nhưng vẫn có nóc để nhảy lên
         const trainWidth = 2.6;
         const trainHeight = 4;
         const trainLength = 20;
-        const rampLength = 8;
+        const rampLength = isMovingTrain ? 0 : 8;
 
-        // Profile (mặt cắt) trong mặt phẳng (length-height), extrude theo bề rộng
-        const halfLen = trainLength / 2;
-        const rampStartZ = halfLen + rampLength; // phía sau (+Z)
-        const frontZ = -halfLen; // phía trước (-Z)
+        let trainMesh;
+        if (isMovingTrain) {
+            const trainGeo = new THREE.BoxGeometry(trainWidth, trainHeight, trainLength);
+            trainGeo.translate(0, trainHeight / 2, 0);
+            const trainMat = new THREE.MeshStandardMaterial({ color: 0xff5a1f, roughness: 0.7 });
+            trainMesh = new THREE.Mesh(trainGeo, trainMat);
+            trainMesh.position.set(laneX, 0, 0);
+            trainMesh.userData = {
+                type: 'obstacle',
+                lane: laneIndex,
+                movingTrain: true,
+                isGround: true,
+                requiresSlide: false,
+                walkableProfile: {
+                    kind: 'train',
+                    trainWidth,
+                    trainHeight,
+                    trainLength,
+                    rampLength: 0
+                }
+            };
+        } else {
+            // Profile (mặt cắt) trong mặt phẳng (length-height), extrude theo bề rộng
+            const halfLen = trainLength / 2;
+            const rampStartZ = halfLen + rampLength; // phía sau (+Z)
+            const frontZ = -halfLen; // phía trước (-Z)
 
-        const profile = new THREE.Shape();
-        profile.moveTo(rampStartZ, 0);
-        profile.lineTo(halfLen, trainHeight);
-        profile.lineTo(frontZ, trainHeight);
-        profile.lineTo(frontZ, 0);
-        profile.lineTo(rampStartZ, 0);
+            const profile = new THREE.Shape();
+            profile.moveTo(rampStartZ, 0);
+            profile.lineTo(halfLen, trainHeight);
+            profile.lineTo(frontZ, trainHeight);
+            profile.lineTo(frontZ, 0);
+            profile.lineTo(rampStartZ, 0);
 
-        const trainGeo = new THREE.ExtrudeGeometry(profile, {
-            depth: trainWidth,
-            bevelEnabled: false,
-            steps: 1
-        });
-        // Center bề rộng quanh trục 0 và xoay để length nằm trên trục Z, width nằm trên trục X
-        trainGeo.translate(0, 0, -trainWidth / 2);
-        trainGeo.rotateY(-Math.PI / 2);
+            const trainGeo = new THREE.ExtrudeGeometry(profile, {
+                depth: trainWidth,
+                bevelEnabled: false,
+                steps: 1
+            });
+            // Center bề rộng quanh trục 0 và xoay để length nằm trên trục Z, width nằm trên trục X
+            trainGeo.translate(0, 0, -trainWidth / 2);
+            trainGeo.rotateY(-Math.PI / 2);
 
-        const trainMat = new THREE.MeshStandardMaterial({ color: 0x1a2b4c, roughness: 0.7 });
-        const trainMesh = new THREE.Mesh(trainGeo, trainMat);
-        trainMesh.position.set(laneX, 0, zPos);
-        trainMesh.userData = {
-            type: 'obstacle',
-            lane: laneIndex,
-            isGround: true,
-            walkableProfile: {
-                kind: 'train',
-                trainWidth,
-                trainHeight,
-                trainLength,
-                rampLength
-            }
-        };
+            const trainMat = new THREE.MeshStandardMaterial({ color: 0x1a2b4c, roughness: 0.7 });
+            trainMesh = new THREE.Mesh(trainGeo, trainMat);
+            trainMesh.position.set(laneX, 0, 0);
+            trainMesh.userData = {
+                type: 'obstacle',
+                lane: laneIndex,
+                isGround: true,
+                walkableProfile: {
+                    kind: 'train',
+                    trainWidth,
+                    trainHeight,
+                    trainLength,
+                    rampLength
+                }
+            };
+        }
         trainGroup.add(trainMesh);
+        trainGroup.position.set(0, 0, zPos);
+
+        if (isMovingTrain) {
+            trainGroup.userData = {
+                type: 'train',
+                movingTrain: true,
+                trainMotion: {
+                    speed: THREE.MathUtils.randFloat(12, 16),
+                    distanceTraveled: 0
+                }
+            };
+        } else {
+            trainGroup.userData = { type: 'train' };
+        }
 
         // === 5. Coin trên nóc tàu ===
-        for (let j = 0; j < 5; j++) {
-            const coinGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.1, 16);
-            const coinMat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.8, roughness: 0.2 });
-            const coin = new THREE.Mesh(coinGeo, coinMat);
-            coin.rotation.x = Math.PI / 2;
-            coin.position.set(laneX, trainHeight + 1.5, zPos - 6 + j * 2.5);
-            coin.userData = { type: 'coin', lane: laneIndex, rotateSpeed: 3 };
-            trainGroup.add(coin);
+        if (!isMovingTrain) {
+            for (let j = 0; j < 5; j++) {
+                const coinGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.1, 16);
+                const coinMat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.8, roughness: 0.2 });
+                const coin = new THREE.Mesh(coinGeo, coinMat);
+                coin.rotation.x = Math.PI / 2;
+                coin.position.set(laneX, trainHeight + 1.5, -6 + j * 2.5);
+                coin.userData = { type: 'coin', lane: laneIndex, rotateSpeed: 3 };
+                trainGroup.add(coin);
+            }
         }
 
         group.add(trainGroup);
     }
 
-    update(playerZ) {
+    update(delta, playerZ) {
+        this.animateTrains(delta);
+
         let frontZ = 0;
         for (const chunk of this.chunks) {
             if (chunk.position.z < frontZ) frontZ = chunk.position.z;
         }
         for (const chunk of this.chunks) {
             if (chunk.position.z > playerZ + this.recycleThreshold) {
-                // 🔥 Reset coin khi chunk được tái sử dụng
-                chunk.traverse((child) => {
-                    if (child.userData && child.userData.type === 'coin') {
-                        child.visible = true;
-                        child.userData.collected = false;
-                    }
-                });
+                this.clearChunkDynamicContent(chunk);
+                this.spawnObjectsOnChunk(chunk);
                 chunk.position.z = frontZ - this.chunkLength;
             }
         }
+    }
+
+    animateTrains(delta) {
+        this.chunks.forEach(chunk => {
+            chunk.traverse((child) => {
+                const motion = child.userData?.trainMotion;
+                if (!motion) return;
+
+                motion.distanceTraveled += motion.speed * delta;
+                child.position.z += motion.speed * delta;
+            });
+        });
     }
 
     animateCoins() {
