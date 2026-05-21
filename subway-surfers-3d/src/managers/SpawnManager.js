@@ -20,6 +20,7 @@ export class SpawnManager {
     this._coinLane = LANE.MIDDLE;
     this._coinShiftsSinceChange = 0;
     this._rampZones = [];
+    this._trainExtents = [];
     this._lastActionTags = [];
     this._movingTrainLaneCount = { 0: 0, 1: 0, 2: 0 };
   }
@@ -175,33 +176,61 @@ export class SpawnManager {
         }
       }
 
-      // Store ramp zone for cross-chunk clearance
-      const rampZoneStart = trainBaseZ + halfLen;
-      const rampZoneEnd = trainBaseZ + halfLen + RAMP_LENGTH + CLEAR_AFTER;
-      this._rampZones.push({
+      // Store train extent for cross-chunk clearance
+      this._trainExtents.push({
         lane: train.lane,
-        zStart: rampZoneStart,
-        zEnd: rampZoneEnd,
+        clearStartZ: trainStartZ,
+        clearEndZ: trainEndZ,
+        bodyStartZ: trainBaseZ - halfLen - (carCount - 1) * CAR_LENGTH,
+        bodyEndZ: trainBaseZ + halfLen + RAMP_LENGTH,
         chunkUuid: chunk.uuid,
       });
     }
 
-    // Moving train: xóa obstacle cùng lane trong toàn bộ chunk
-    // (các row đều nằm trong chunk, cần clear lane của train ở mọi row)
+    // Moving train: xóa obstacle cùng lane + lane kế trong toàn bộ chunk
     for (const train of trains) {
       if (!train.isMoving) continue;
+      const carCount = train.cars || 1;
+      const halfLen = CAR_LENGTH / 2;
+      const trainBaseZ = chunkZ + train.z;
+      const trainStartZ = trainBaseZ - halfLen - (carCount - 1) * CAR_LENGTH;
+      const trainEndZ = trainBaseZ + halfLen;
       for (const row of rows) {
         row.obstacles = row.obstacles.filter(o => o.lane !== train.lane);
       }
+      // Clear obstacle ở lane kế bên trong phạm vi thân train (vì train rộng 2.6)
+      const adjLanes = LaneUtils.getAdjacentLanes(train.lane);
+      if (adjLanes.length > 0) {
+        for (const row of rows) {
+          const rowWorldZ = chunkZ + row.z;
+          if (rowWorldZ >= trainStartZ && rowWorldZ <= trainEndZ) {
+            row.obstacles = row.obstacles.filter(o => !adjLanes.includes(o.lane));
+          }
+        }
+      }
+      // Store moving train extent for cross-chunk clearance
+      this._trainExtents.push({
+        lane: train.lane,
+        clearStartZ: trainStartZ - CLEAR_BEFORE,
+        clearEndZ: trainEndZ + CLEAR_AFTER,
+        bodyStartZ: trainStartZ,
+        bodyEndZ: trainEndZ,
+        chunkUuid: chunk.uuid,
+      });
     }
 
-    // Cross-chunk clearance: clear obstacles in this chunk that overlap with ramp zones from OTHER chunks
-    for (const zone of this._rampZones) {
-      if (zone.chunkUuid === chunk.uuid) continue;
+    // Cross-chunk clearance: clear obstacles in this chunk that overlap with train extents from OTHER chunks
+    for (const ext of this._trainExtents) {
+      if (ext.chunkUuid === chunk.uuid) continue;
       for (const row of rows) {
         const rowWorldZ = chunkZ + row.z;
-        if (rowWorldZ >= zone.zStart && rowWorldZ <= zone.zEnd) {
-          row.obstacles = row.obstacles.filter(o => o.lane !== zone.lane);
+        if (rowWorldZ >= ext.clearStartZ && rowWorldZ <= ext.clearEndZ) {
+          row.obstacles = row.obstacles.filter(o => o.lane !== ext.lane);
+        }
+        // Clear adjacent lanes within body extent
+        const adjLanes = LaneUtils.getAdjacentLanes(ext.lane);
+        if (adjLanes.length > 0 && rowWorldZ >= ext.bodyStartZ && rowWorldZ <= ext.bodyEndZ) {
+          row.obstacles = row.obstacles.filter(o => !adjLanes.includes(o.lane));
         }
       }
     }
@@ -523,6 +552,9 @@ export class SpawnManager {
       }
     }
     delete this._currentChunkPatterns[chunk.uuid];
+    // Clean up persistent train extents and ramp zones for this chunk
+    this._trainExtents = this._trainExtents.filter(e => e.chunkUuid !== chunk.uuid);
+    this._rampZones = this._rampZones.filter(z => z.chunkUuid !== chunk.uuid);
   }
 
   _hasActiveStaticTrainInLane(excludeChunk, lane) {
@@ -552,6 +584,8 @@ export class SpawnManager {
     this._chunksGenerated = 0;
     this._currentChunkPatterns = {};
     this._activeStaticTrainLanes.clear();
+    this._rampZones = [];
+    this._trainExtents = [];
     this._coinLane = LANE.MIDDLE;
     this._coinShiftsSinceChange = 0;
     this._movingTrainLaneCount = { 0: 0, 1: 0, 2: 0 };

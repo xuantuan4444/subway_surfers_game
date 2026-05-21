@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-const CYCLE_DURATION = 90;
+const CYCLE_DURATION = 180;
 
 const DAY_COLOR = new THREE.Color(0x99ddff);
 const SUNSET_COLOR = new THREE.Color(0xff8844);

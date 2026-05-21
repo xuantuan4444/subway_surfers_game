@@ -70,7 +70,8 @@ export class CollisionManager {
 
                 const objectTopY = this.objectBox.max.y;
 
-                const isFalling = (player.verticalVelocity ?? 0) <= 0;
+                const isSliding = player.isSliding === true;
+                const isFalling = isSliding || (player.verticalVelocity ?? 0) <= 0;
                 const isJumping = player.isJumping === true;
 
                 // --- Walkable surface check (train ramp + roof) ---

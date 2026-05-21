@@ -116,6 +116,7 @@ export class TrackManager {
     this.recycleThreshold = CHUNK.RECYCLE_THRESHOLD;
     this.spawnManager = new SpawnManager();
     this._playerZ = 0;
+    this._playerSpeed = 18;
     this.lampLights = [];
     this._lampTargetIntensity = 0;
     this._lampCurrentIntensity = 0;
@@ -448,11 +449,16 @@ export class TrackManager {
     trainGroup.position.set(xPos, 0, zPos);
 
     if (isMoving) {
+      const baseMin = 12;
+      const baseMax = 16;
+      const ratio = this._playerSpeed / 18;
+      const minSpeed = Math.round(baseMin * ratio * 10) / 10;
+      const maxSpeed = Math.round(baseMax * ratio * 10) / 10;
       trainGroup.userData = {
         type: 'train',
         movingTrain: true,
         trainMotion: {
-          speed: THREE.MathUtils.randFloat(12, 16),
+          speed: THREE.MathUtils.randFloat(minSpeed, maxSpeed),
           distanceTraveled: 0,
           initialZ: zPos,
         }
@@ -549,9 +555,10 @@ export class TrackManager {
     chunk.add(mesh);
   }
 
-  update(delta, playerZ, playerLane) {
+  update(delta, speed, playerZ, playerLane) {
     this._playerZ = playerZ;
-    this.spawnManager.update(delta, 18, playerZ, playerLane);
+    this._playerSpeed = speed;
+    this.spawnManager.update(delta, speed, playerZ, playerLane);
     this.animateCoins(delta);
 
     this.animateTrains(delta);
@@ -647,6 +654,7 @@ export class TrackManager {
 
   reset() {
     this.spawnManager.reset();
+    this._playerSpeed = 18;
     for (const chunk of this.chunks) {
       this.scene.remove(chunk);
     }

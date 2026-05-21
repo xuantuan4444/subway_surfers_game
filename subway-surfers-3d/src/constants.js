@@ -137,6 +137,12 @@ export const CHUNK = {
   RECYCLE_THRESHOLD: 170,
 };
 
+export const SPEED_CONFIG = {
+  BASE_SPEED: 18,
+  MAX_SPEED: 40,
+  INCREASE_RATE: 0.25,
+};
+
 export const ACTION_DISTANCE = {
   LOW_BARRIER: 4,
   HIGH_BARRIER: 4,

@@ -1,5 +1,6 @@
 // src/entities/Player.js
 import * as THREE from 'three';
+import { SPEED_CONFIG } from '../constants.js';
 
 export class Player {
     constructor(scene, audio = null) {
@@ -90,6 +91,10 @@ export class Player {
             this.mesh.scale.y = 0.5;
             if (this.audio) this.audio.playRandom('swipe');
         }
+    }
+
+    setForwardSpeed(speed) {
+        this.forwardSpeed = speed;
     }
 
     onSideHit(hitLane) {
@@ -241,5 +246,6 @@ export class Player {
         this.trainGraceTimer = 0;
         this.trainGraceTrainUuid = null;
         this.footstepTimer = 0;
+        this.forwardSpeed = SPEED_CONFIG.BASE_SPEED;
     }
 }

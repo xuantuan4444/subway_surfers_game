@@ -15,6 +15,8 @@ export class Chaser {
         this.approachSpeed = 80;
         this.retreatSpeed = 15;
 
+        this.speedMultiplier = 1.0;
+
         this.STATE = {
             INACTIVE: 'inactive',
             APPROACHING: 'approaching',
@@ -22,6 +24,10 @@ export class Chaser {
             RETREATING: 'retreating'
         };
         this.state = this.STATE.INACTIVE;
+    }
+
+    setSpeedMultiplier(multiplier) {
+        this.speedMultiplier = multiplier;
     }
 
     createMesh() {
@@ -78,7 +84,7 @@ export class Chaser {
     }
 
     updateApproaching(delta, playerMesh) {
-        this.offset -= this.approachSpeed * delta;
+        this.offset -= this.approachSpeed * this.speedMultiplier * delta;
         if (this.offset < 0) this.offset = 0;
 
         this.mesh.position.z = playerMesh.position.z + this.followDistance + this.offset;
@@ -105,7 +111,7 @@ export class Chaser {
     }
 
     updateRetreating(delta, playerMesh) {
-        this.offset += this.retreatSpeed * delta;
+        this.offset += this.retreatSpeed * this.speedMultiplier * delta;
         if (this.offset > 30) this.offset = 30;
 
         this.mesh.position.z = playerMesh.position.z + this.offset;

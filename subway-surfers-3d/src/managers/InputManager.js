@@ -1,12 +1,17 @@
-// src/managers/InputManager.js
 export class InputManager {
     constructor(player) {
         this.player = player;
+        this.enabled = false;
         this.initControls();
+    }
+
+    setEnabled(enabled) {
+        this.enabled = enabled;
     }
 
     initControls() {
         window.addEventListener('keydown', (event) => {
+            if (!this.enabled) return;
             switch(event.code) {
                 case 'ArrowLeft':
                 case 'KeyA':
