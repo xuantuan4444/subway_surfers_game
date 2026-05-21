@@ -48,6 +48,10 @@ export class CollisionManager {
                 if (type !== 'coin' && type !== 'obstacle') continue;
 
                 this.objectBox.setFromObject(obj);
+                if (type === 'coin') {
+                  this.objectBox.min.y = -1;
+                  this.objectBox.max.y = 6;
+                }
                 if (!this.playerBox.intersectsBox(this.objectBox)) continue;
 
                 if (type === 'coin') {

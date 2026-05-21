@@ -10,11 +10,11 @@ export class Player {
         this.targetX = 0;
         
         this.verticalVelocity = 0;
-        this.gravity = -30;
-        this.jumpForce = 12;
+        this.gravity = -45;
+        this.jumpForce = 15;
         this.isJumping = false;
         this.isSliding = false;
-        this.slideDuration = 0.8;
+        this.slideDuration = 0.4;
         this.slideTimer = 0;
 
         this.geometry = new THREE.BoxGeometry(1, 2, 1);
