@@ -3,6 +3,9 @@ import { LaneUtils } from '../utils/LaneUtils.js';
 import { PatternLibrary, PatternValidator } from '../patterns/PatternLibrary.js';
 import { DifficultyManager } from './DifficultyManager.js';
 
+const CAR_LENGTH = 20;
+const RAMP_LENGTH = 8;
+
 export class SpawnManager {
   constructor() {
     this.library = PatternLibrary.createDefault();
@@ -16,6 +19,9 @@ export class SpawnManager {
     this._activeStaticTrainLanes = new Set();
     this._coinLane = LANE.MIDDLE;
     this._coinShiftsSinceChange = 0;
+    this._rampZones = [];
+    this._lastActionTags = [];
+    this._movingTrainLaneCount = { 0: 0, 1: 0, 2: 0 };
   }
 
   update(delta, speed, playerZ, playerLane) {
@@ -81,12 +87,34 @@ export class SpawnManager {
 
       let pattern = this.library.getRandomByCategory(category);
       let attempts = 0;
-      while (
-        pattern &&
-        prevPattern &&
-        !PatternValidator.canTransition(prevPattern, pattern, Math.abs(rowWorldZ - (prevWorldZ || rowWorldZ))) &&
-        attempts < 10
-      ) {
+      while (pattern && attempts < 20) {
+        let rejected = false;
+        if (prevPattern) {
+          const spacing = Math.abs(rowWorldZ - (prevWorldZ || rowWorldZ));
+          if (!PatternValidator.canTransition(prevPattern, pattern, spacing)) {
+            rejected = true;
+          }
+        }
+        if (!rejected && this._lastActionTags.length > 0) {
+          const minGap = this._calcMinActionGap(rowWorldZ);
+          if (this._conflictsWithRecentActions(pattern, minGap)) {
+            rejected = true;
+          }
+        }
+        // Cân bằng tỉ lệ moving train giữa 3 lane
+        if (!rejected) {
+          for (const lane of [0, 1, 2]) {
+            const obs = pattern.obstacles && pattern.obstacles[lane];
+            if (obs && obs.type === OBSTACLE.MOVING_TRAIN) {
+              const minCount = Math.min(...Object.values(this._movingTrainLaneCount));
+              if (this._movingTrainLaneCount[lane] > minCount) {
+                rejected = true;
+              }
+              break;
+            }
+          }
+        }
+        if (!rejected) break;
         pattern = this.library.getRandomByCategory(category);
         attempts++;
       }
@@ -96,31 +124,98 @@ export class SpawnManager {
       }
 
       if (pattern) {
+        const prevTrainCount = trains.length;
         const rowData = this._buildRowData(pattern, rowOffset, trains);
         rows.push(rowData);
+        // Cập nhật ngay count moving train để row sau trong cùng chunk biết lane nào đã dùng
+        for (let t = prevTrainCount; t < trains.length; t++) {
+          if (trains[t].isMoving) {
+            this._movingTrainLaneCount[trains[t].lane] = (this._movingTrainLaneCount[trains[t].lane] || 0) + 1;
+          }
+        }
         prevPattern = pattern;
         prevWorldZ = rowWorldZ;
       }
     }
 
-    // Fix 3: Clear obstacles trong lane của static train
+    // Kiểm tra không có tình huống bí (cả 3 lane đều blocked ở cùng Z)
+    if (!this._validateNoEscape(rows, trains, chunkZ)) {
+      return this._generateRows(numRows, chunk, chunkZ, mode);
+    }
+
+    // Clear obstacles trong lane của static train + ramp
     // Multi-car train: cars * 20 units long. Ramp chỉ ở car đầu tiên.
-    // Clearance: toàn bộ train + ramp + 12 units trước + 8 units sau
+    // Clearance: toàn bộ train + ramp + margin
+    // Đồng thời xóa obstacle ở lane kế bên trong vùng train body (vì train lấn sang lane kế)
     const CLEAR_BEFORE = 12;
-    const CLEAR_AFTER = 8;
+    const CLEAR_AFTER = 16;
     for (const train of trains) {
       if (train.isMoving) continue;
       const carCount = train.cars || 1;
+      const halfLen = CAR_LENGTH / 2;
       const trainBaseZ = chunkZ + train.z;
-      const trainStartZ = trainBaseZ - 10 - CLEAR_BEFORE;
-      const trainEndZ = trainBaseZ + 10 + (carCount - 1) * 20 + 18 + CLEAR_AFTER;
+      const trainStartZ = trainBaseZ - halfLen - (carCount - 1) * CAR_LENGTH - CLEAR_BEFORE;
+      const trainEndZ = trainBaseZ + halfLen + RAMP_LENGTH + CLEAR_AFTER;
       for (const row of rows) {
         const rowWorldZ = chunkZ + row.z;
         if (rowWorldZ >= trainStartZ && rowWorldZ <= trainEndZ) {
           row.obstacles = row.obstacles.filter(o => o.lane !== train.lane);
         }
       }
+      // Clear obstacle ở lane kế bên trong phạm vi thân train lấn sang
+      const adjLanes = LaneUtils.getAdjacentLanes(train.lane);
+      if (adjLanes.length > 0) {
+        const bodyStartZ = trainBaseZ - halfLen - (carCount - 1) * CAR_LENGTH;
+        const bodyEndZ = trainBaseZ + halfLen + RAMP_LENGTH;
+        for (const row of rows) {
+          const rowWorldZ = chunkZ + row.z;
+          if (rowWorldZ >= bodyStartZ && rowWorldZ <= bodyEndZ) {
+            row.obstacles = row.obstacles.filter(o => !adjLanes.includes(o.lane));
+          }
+        }
+      }
+
+      // Store ramp zone for cross-chunk clearance
+      const rampZoneStart = trainBaseZ + halfLen;
+      const rampZoneEnd = trainBaseZ + halfLen + RAMP_LENGTH + CLEAR_AFTER;
+      this._rampZones.push({
+        lane: train.lane,
+        zStart: rampZoneStart,
+        zEnd: rampZoneEnd,
+        chunkUuid: chunk.uuid,
+      });
     }
+
+    // Moving train: xóa obstacle cùng lane trong toàn bộ chunk
+    // (các row đều nằm trong chunk, cần clear lane của train ở mọi row)
+    for (const train of trains) {
+      if (!train.isMoving) continue;
+      for (const row of rows) {
+        row.obstacles = row.obstacles.filter(o => o.lane !== train.lane);
+      }
+    }
+
+    // Cross-chunk clearance: clear obstacles in this chunk that overlap with ramp zones from OTHER chunks
+    for (const zone of this._rampZones) {
+      if (zone.chunkUuid === chunk.uuid) continue;
+      for (const row of rows) {
+        const rowWorldZ = chunkZ + row.z;
+        if (rowWorldZ >= zone.zStart && rowWorldZ <= zone.zEnd) {
+          row.obstacles = row.obstacles.filter(o => o.lane !== zone.lane);
+        }
+      }
+    }
+
+    // Track action tags for consecutive-pattern conflict prevention
+    for (const row of rows) {
+      for (const obs of row.obstacles) {
+        if (obs.type === OBSTACLE.LOW_BARRIER) this._lastActionTags.push({ tag: 'jump', z: chunkZ + row.z });
+        if (obs.type === OBSTACLE.HIGH_BARRIER) this._lastActionTags.push({ tag: 'slide', z: chunkZ + row.z });
+      }
+    }
+    // Keep only recent tags (within 30 units)
+    const cutoffZ = chunkZ + 10;
+    this._lastActionTags = this._lastActionTags.filter(t => t.z >= cutoffZ);
 
     // Fix 4: Remove moving trains that conflict with static train lanes
     const staticLanesFromPrev = this._activeStaticTrainLanes;
@@ -191,6 +286,57 @@ export class SpawnManager {
     return { pattern, z: rowZ, obstacles };
   }
 
+  _validateNoEscape(rows, trains, chunkZ) {
+    // Xây dựng lane mask cho mỗi Z position (mỗi row + train extent)
+    const blocked = { 0: [], 1: [], 2: [] };
+    for (const row of rows) {
+      const rz = chunkZ + row.z;
+      for (const obs of row.obstacles) {
+        let halfLen = 3;
+        if (obs.type === OBSTACLE.STATIC_TRAIN || obs.type === OBSTACLE.MOVING_TRAIN) {
+          const train = trains.find(
+            t => t.lane === obs.lane && Math.abs(t.z - row.z) < 5
+          );
+          const cars = train ? (train.cars || 1) : 1;
+          halfLen = 10 + (cars - 1) * CAR_LENGTH;
+        }
+        blocked[obs.lane].push({ start: rz - halfLen, end: rz + halfLen });
+      }
+    }
+    // Merge per lane
+    for (const lane of [0, 1, 2]) {
+      blocked[lane].sort((a, b) => a.start - b.start);
+      const merged = [];
+      for (const r of blocked[lane]) {
+        if (merged.length > 0 && r.start <= merged[merged.length - 1].end) {
+          merged[merged.length - 1].end = Math.max(merged[merged.length - 1].end, r.end);
+        } else {
+          merged.push({ start: r.start, end: r.end });
+        }
+      }
+      blocked[lane] = merged;
+    }
+    // Check each row's Z + train midpoints for inescapable situations
+    const checkZ = (z) => {
+      const blockedLanes = [0, 1, 2].filter(l =>
+        blocked[l].some(r => z >= r.start && z <= r.end)
+      );
+      return blockedLanes.length < 3;
+    };
+    for (const row of rows) {
+      if (!checkZ(chunkZ + row.z)) return false;
+    }
+    for (const train of trains) {
+      const tz = chunkZ + train.z;
+      const cars = train.cars || 1;
+      const halfLen = 10 + (cars - 1) * CAR_LENGTH;
+      if (!checkZ(tz)) return false;
+      if (!checkZ(tz - halfLen)) return false;
+      if (!checkZ(tz + halfLen)) return false;
+    }
+    return true;
+  }
+
   _buildCoinTrail(chunkZ, numRows, rows, trains) {
     const coins = [];
     const chunkLen = CHUNK.LENGTH;
@@ -201,18 +347,48 @@ export class SpawnManager {
 
     // Build per-lane blocked Z ranges (world-space)
     const blockedRanges = { 0: [], 1: [], 2: [] };
+    const ALL_LANES = [0, 1, 2];
     for (const row of rows) {
       for (const obs of row.obstacles) {
         const worldZ = chunkZ + row.z;
-        let halfWidth = 3;
+        let halfWidth = 5;
         if (obs.type === OBSTACLE.STATIC_TRAIN || obs.type === OBSTACLE.MOVING_TRAIN) {
           const train = trains.find(
             t => t.lane === obs.lane && Math.abs((chunkZ + t.z) - worldZ) < 10
           );
           const carCount = train ? (train.cars || 1) : 1;
-          halfWidth = 10 + (carCount - 1) * 10 + 9;
+          // Block full train extent from rear past last car to front past ramp
+          const frontExtent = 10 + RAMP_LENGTH + 8; // car front + ramp + margin
+          const rearExtent = 10 + (carCount - 1) * CAR_LENGTH; // rear of last car
+          halfWidth = Math.max(frontExtent, rearExtent);
+          // Also block adjacent lanes near the train front (car front to past ramp)
+          for (const adjLane of ALL_LANES) {
+            if (adjLane === obs.lane) continue;
+            blockedRanges[adjLane].push({
+              start: worldZ + 10,
+              end: worldZ + frontExtent,
+            });
+          }
         }
         blockedRanges[obs.lane].push({ start: worldZ - halfWidth, end: worldZ + halfWidth });
+      }
+    }
+
+    // Bổ sung blocked range từ trains array (vì obstacle của train đã bị xóa ở clearance)
+    for (const train of trains) {
+      const worldZ = chunkZ + train.z;
+      const carCount = train.cars || 1;
+      const frontExtent = 10 + (train.isMoving ? 0 : RAMP_LENGTH) + 8;
+      const rearExtent = 10 + (carCount - 1) * CAR_LENGTH;
+      const halfWidth = Math.max(frontExtent, rearExtent);
+      blockedRanges[train.lane].push({ start: worldZ - halfWidth, end: worldZ + halfWidth });
+      // Block adjacent lanes cho toàn bộ chiều dài train (body + ramp)
+      // Vì train rộng 2.6 units, lấn 0.2 unit sang lane kế bên
+      const trainStart = worldZ - 10 - (carCount - 1) * CAR_LENGTH;
+      const trainEnd = worldZ + (train.isMoving ? 10 : 10 + RAMP_LENGTH + 8);
+      for (const adjLane of ALL_LANES) {
+        if (adjLane === train.lane) continue;
+        blockedRanges[adjLane].push({ start: trainStart, end: trainEnd });
       }
     }
 
@@ -280,7 +456,7 @@ export class SpawnManager {
       }
 
       // Obstacle avoidance: if current position is blocked, snap to safe lane
-      const approxLane = xToLane(coinX);
+      let approxLane = xToLane(coinX);
       if (isBlocked(approxLane, worldZ)) {
         const safe = getSafeLane(worldZ);
         if (safe !== null) {
@@ -293,7 +469,13 @@ export class SpawnManager {
         }
       }
 
+      // Extra safety: if after lane correction the coin still lands
+      // inside an obstacle's physical bounds, skip this coin.
       const lane = xToLane(coinX);
+      if (isBlocked(lane, worldZ)) {
+        continue;
+      }
+
       coins.push({
         lane,
         x: coinX,
@@ -372,5 +554,6 @@ export class SpawnManager {
     this._activeStaticTrainLanes.clear();
     this._coinLane = LANE.MIDDLE;
     this._coinShiftsSinceChange = 0;
+    this._movingTrainLaneCount = { 0: 0, 1: 0, 2: 0 };
   }
 }

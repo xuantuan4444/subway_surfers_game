@@ -2,8 +2,9 @@
 import * as THREE from 'three';
 
 export class Player {
-    constructor(scene) {
+    constructor(scene, audio = null) {
         this.scene = scene;
+        this.audio = audio;
         this.laneWidth = 3;
         this.currentLane = 1;
         this.previousLane = 1;
@@ -21,6 +22,8 @@ export class Player {
         this.material = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
         this.mesh = new THREE.Mesh(this.geometry, this.material);
         this.mesh.position.set(0, 1, -5);
+        this.mesh.castShadow = true;
+        this.mesh.receiveShadow = true;
         this.scene.add(this.mesh);
 
         this.forwardSpeed = 18;
@@ -37,6 +40,9 @@ export class Player {
         // Dùng để "ân hạn" collision khi vừa rời nóc tàu trong lúc đổi lane (tránh chết oan)
         this.trainGraceTimer = 0;
         this.trainGraceTrainUuid = null;
+
+        this.footstepTimer = 0;
+        this.footstepInterval = 0.35;
     }
 
     moveLeft() {    
@@ -45,6 +51,7 @@ export class Player {
             this.previousLane = this.currentLane;
             this.currentLane--;
             this.targetX = (this.currentLane - 1) * this.laneWidth;
+            if (this.audio) this.audio.playRandom('swipe');
         }
     }
 
@@ -54,6 +61,7 @@ export class Player {
             this.previousLane = this.currentLane;
             this.currentLane++;
             this.targetX = (this.currentLane - 1) * this.laneWidth;
+            if (this.audio) this.audio.playRandom('swipe');
         }
     }
 
@@ -68,6 +76,7 @@ export class Player {
         if (!this.isJumping && !this.returningToLane) {
             this.verticalVelocity = this.jumpForce;
             this.isJumping = true;
+            if (this.audio) this.audio.playRandom('swipe');
         }
     }
 
@@ -79,6 +88,7 @@ export class Player {
             this.isSliding = true;
             this.slideTimer = this.slideDuration;
             this.mesh.scale.y = 0.5;
+            if (this.audio) this.audio.playRandom('swipe');
         }
     }
 
@@ -195,6 +205,17 @@ export class Player {
                 this.verticalVelocity = 0;
             }
         }
+
+        // Footstep — chỉ khi đang chạy trên mặt đất
+        if (this.audio && !this.isJumping && !this.isSliding && foundGround) {
+            this.footstepTimer -= delta;
+            if (this.footstepTimer <= 0) {
+                this.audio.playRandom('step', { volume: 0.2 });
+                this.footstepTimer = this.footstepInterval;
+            }
+        } else {
+            this.footstepTimer = 0;
+        }
     }
 
     getBoundingBox() {
@@ -219,5 +240,6 @@ export class Player {
         this.groundObjects = [];
         this.trainGraceTimer = 0;
         this.trainGraceTrainUuid = null;
+        this.footstepTimer = 0;
     }
 }

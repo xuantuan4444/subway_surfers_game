@@ -31,6 +31,8 @@ export class Chaser {
             new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xff0000, emissiveIntensity: 1.0 })
         );
         body.position.y = 1.4;
+        body.castShadow = true;
+        body.receiveShadow = true;
         group.add(body);
 
         const eyeGeo = new THREE.SphereGeometry(0.2, 8, 8);

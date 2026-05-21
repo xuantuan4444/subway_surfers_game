@@ -4,6 +4,8 @@ import { TrackManager } from './managers/TrackManager.js';
 import { InputManager } from './managers/InputManager.js';
 import { CollisionManager } from './managers/CollisionManager.js';
 import { Chaser } from './entities/Chaser.js';
+import { AudioManager } from './managers/AudioManager.js';
+import { LightingManager } from './managers/LightingManager.js';
 
 export class Game {
   constructor() {
@@ -22,16 +24,16 @@ export class Game {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.6;
     document.body.appendChild(this.renderer.domElement);
 
-    this.scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    dirLight.position.set(10, 20, 10);
-    dirLight.castShadow = true;
-    this.scene.add(dirLight);
+    this.lighting = new LightingManager(this.scene);
 
+    this.audio = new AudioManager().init();
     this.track = new TrackManager(this.scene);
-    this.player = new Player(this.scene);
+    this.player = new Player(this.scene, this.audio);
     this.input = new InputManager(this.player);
     this.collision = new CollisionManager();
     this.chaser = new Chaser(this.scene);
@@ -48,6 +50,26 @@ export class Game {
 
     window.addEventListener('resize', () => this.onResize());
     this.updateUI();
+
+    this.audio.loadManifest({
+      sfx: {
+        coin: 'coin.mp3',
+        step1: 'Footsteps 1.mp3',
+        step2: 'Footsteps 2.mp3',
+        step3: 'Footsteps 3.mp3',
+        step4: 'Footsteps 4.mp3',
+        step5: 'Footsteps 5.mp3',
+        swipe1: 'Swipes 1.mp3',
+        swipe2: 'Swipes 2.mp3',
+        swipe3: 'Swipes 3.mp3',
+        swipe4: 'Swipes 4.mp3',
+        swipe5: 'Swipes 5.mp3',
+        swipe6: 'Swipes 6.mp3',
+        swipe7: 'Swipes 7.mp3',
+        swipe8: 'Swipes 8.mp3',
+        swipe9: 'Swipes 9.mp3',
+      },
+    });
   }
 
   start() {
@@ -62,6 +84,7 @@ export class Game {
     this._prevChaserActive = this.chaser.active;
     this.updateUI();
     if (this.uiGameOver) this.uiGameOver.style.display = 'none';
+    this.lighting.reset();
     this.track.reset();
     this.animate();
   }
@@ -84,6 +107,8 @@ export class Game {
     requestAnimationFrame(() => this.animate());
     const delta = this.clock.getDelta();
 
+    this.lighting.update(delta, this.player.mesh.position.z);
+    this.track.setLampIntensity(this.lighting.darkness);
     this.track.update(delta, this.player.mesh.position.z, this.player.currentLane);
     this.player.update(delta, this.track.chunks);
 
@@ -99,6 +124,11 @@ export class Game {
     if (collisionResult.coinsCollected > 0) {
       this.score += collisionResult.coinsCollected * 10;
       this.updateUI();
+      this.audio.play('coin', {
+        volume: 0.35,
+        filter: { type: 'lowpass', frequency: 600, Q: 0.5 },
+        compressor: { threshold: -20, ratio: 8 },
+      });
     }
 
     if (collisionResult.hitType) {
