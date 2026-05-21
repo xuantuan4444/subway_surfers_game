@@ -48,6 +48,7 @@ export const DIFFICULTY_CONFIG = {
     rowsPerChunk: { min: 4, max: 6 },
     minReactionZ: 12,
     coinShiftChance: 0.10,
+    powerUpChance: 0.06,
   },
   [DIFFICULTY.MID]: {
     startTime: 20,
@@ -65,6 +66,7 @@ export const DIFFICULTY_CONFIG = {
     rowsPerChunk: { min: 5, max: 7 },
     minReactionZ: 10,
     coinShiftChance: 0.15,
+    powerUpChance: 0.10,
   },
   [DIFFICULTY.LATE]: {
     startTime: 60,
@@ -82,6 +84,7 @@ export const DIFFICULTY_CONFIG = {
     rowsPerChunk: { min: 6, max: 8 },
     minReactionZ: 8,
     coinShiftChance: 0.20,
+    powerUpChance: 0.14,
   },
   [DIFFICULTY.ENDLESS]: {
     startTime: 120,
@@ -99,6 +102,7 @@ export const DIFFICULTY_CONFIG = {
     rowsPerChunk: { min: 7, max: 10 },
     minReactionZ: 6,
     coinShiftChance: 0.25,
+    powerUpChance: 0.18,
   },
 };
 
@@ -141,6 +145,20 @@ export const SPEED_CONFIG = {
   BASE_SPEED: 18,
   MAX_SPEED: 40,
   INCREASE_RATE: 0.25,
+};
+
+export const POWERUP = {
+  SCORE_2X: 'score_2x',
+  SCORE_4X: 'score_4x',
+  MAGNET: 'magnet',
+  SNEAKERS: 'sneakers',
+};
+
+export const POWERUP_CONFIG = {
+  [POWERUP.SCORE_2X]: { duration: 12, color: 0xffd700, emissive: 0xff8800 },
+  [POWERUP.SCORE_4X]: { duration: 12, color: 0xaa44ff, emissive: 0x7700dd },
+  [POWERUP.MAGNET]:   { duration: 10, color: 0x4488ff, emissive: 0x0044ff },
+  [POWERUP.SNEAKERS]: { duration: 10, color: 0x44ff44, emissive: 0x00cc00 },
 };
 
 export const ACTION_DISTANCE = {

@@ -1,4 +1,4 @@
-import { LANE, OBSTACLE, PATTERN_CATEGORY, CHUNK } from '../constants.js';
+import { LANE, OBSTACLE, PATTERN_CATEGORY, CHUNK, POWERUP } from '../constants.js';
 import { LaneUtils } from '../utils/LaneUtils.js';
 import { PatternLibrary, PatternValidator } from '../patterns/PatternLibrary.js';
 import { DifficultyManager } from './DifficultyManager.js';
@@ -23,6 +23,7 @@ export class SpawnManager {
     this._trainExtents = [];
     this._lastActionTags = [];
     this._movingTrainLaneCount = { 0: 0, 1: 0, 2: 0 };
+    this._lastPowerUpZ = -999;
   }
 
   update(delta, speed, playerZ, playerLane) {
@@ -58,7 +59,7 @@ export class SpawnManager {
           value: 10,
         });
       }
-      return { rows: [], coins, trains: [], patternCount: 0 };
+      return { rows: [], coins, trains: [], patternCount: 0, powerUps: [] };
     }
 
     // Chunks 2-3: warm up (chỉ easy, ít row)
@@ -270,10 +271,13 @@ export class SpawnManager {
     const coinTrail = this._buildCoinTrail(chunkZ, numRows, rows, trains);
     coins.push(...coinTrail);
 
+    // Power-ups: replace some coin positions
+    const powerUps = this._placePowerUps(chunkZ, coins);
+
     this.lastPattern = prevPattern;
     this.lastRowZ = prevWorldZ;
 
-    const result = { rows, coins, trains, patternCount: numRows };
+    const result = { rows, coins, trains, patternCount: numRows, powerUps };
     this._currentChunkPatterns[chunk.uuid] = result;
     return result;
   }
@@ -542,6 +546,41 @@ export class SpawnManager {
     return coins;
   }
 
+  _pickPowerUpType() {
+    const roll = Math.random();
+    if (roll < 0.55) return POWERUP.SCORE_2X;
+    if (roll < 0.75) return POWERUP.MAGNET;
+    if (roll < 0.95) return POWERUP.SNEAKERS;
+    return POWERUP.SCORE_4X;
+  }
+
+  _placePowerUps(chunkZ, coins) {
+    const config = this.difficulty.getConfig();
+    const chance = config.powerUpChance || 0.08;
+    const minGap = 20;
+    const powerUps = [];
+    for (let i = 0; i < coins.length; i++) {
+      const coin = coins[i];
+      if (coin.type !== 'trail') continue;
+      const worldZ = chunkZ + coin.z;
+      if (Math.abs(worldZ - this._lastPowerUpZ) < minGap) continue;
+      if (Math.random() < chance) {
+        const type = this._pickPowerUpType();
+        powerUps.push({
+          lane: coin.lane,
+          x: coin.x,
+          z: coin.z,
+          type: 'powerup',
+          powerUpType: type,
+        });
+        coins.splice(i, 1);
+        i--;
+        this._lastPowerUpZ = worldZ;
+      }
+    }
+    return powerUps;
+  }
+
   clearChunkData(chunk) {
     const data = this._currentChunkPatterns[chunk.uuid];
     if (data) {
@@ -555,6 +594,7 @@ export class SpawnManager {
     // Clean up persistent train extents and ramp zones for this chunk
     this._trainExtents = this._trainExtents.filter(e => e.chunkUuid !== chunk.uuid);
     this._rampZones = this._rampZones.filter(z => z.chunkUuid !== chunk.uuid);
+    this._lastPowerUpZ = -999;
   }
 
   _hasActiveStaticTrainInLane(excludeChunk, lane) {
@@ -589,5 +629,6 @@ export class SpawnManager {
     this._coinLane = LANE.MIDDLE;
     this._coinShiftsSinceChange = 0;
     this._movingTrainLaneCount = { 0: 0, 1: 0, 2: 0 };
+    this._lastPowerUpZ = -999;
   }
 }

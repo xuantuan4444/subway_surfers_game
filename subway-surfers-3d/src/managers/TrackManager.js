@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { LANE, OBSTACLE, CHUNK } from '../constants.js';
+import { LANE, OBSTACLE, CHUNK, POWERUP, POWERUP_CONFIG } from '../constants.js';
 import { LaneUtils } from '../utils/LaneUtils.js';
 import { SpawnManager } from './SpawnManager.js';
 
@@ -311,6 +311,10 @@ export class TrackManager {
       this._spawnPatternCoin(chunk, coin);
     }
 
+    for (const pu of (content.powerUps || [])) {
+      this._spawnPatternPowerUp(chunk, pu);
+    }
+
     chunk.userData.baseChildCount = baseCount;
   }
 
@@ -555,11 +559,46 @@ export class TrackManager {
     chunk.add(mesh);
   }
 
+  _spawnPatternPowerUp(chunk, pu) {
+    const cfg = POWERUP_CONFIG[pu.powerUpType] || POWERUP_CONFIG[POWERUP.SCORE_2X];
+    const geo = new THREE.SphereGeometry(0.5, 12, 12);
+    const mat = new THREE.MeshStandardMaterial({
+      color: cfg.color,
+      emissive: cfg.emissive,
+      emissiveIntensity: 0.3,
+      metalness: 0.3,
+      roughness: 0.4,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true;
+    mesh.position.set(pu.x, 2.2, pu.z);
+    mesh.userData = {
+      type: 'powerup',
+      powerUpType: pu.powerUpType,
+    };
+
+    const glowMat = new THREE.SpriteMaterial({
+      map: this._coinGlowTex,
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      opacity: 0.3,
+      depthWrite: false,
+      color: cfg.color,
+    });
+    const glow = new THREE.Sprite(glowMat);
+    glow.scale.set(4, 4, 1);
+    glow.position.y = 0;
+    mesh.add(glow);
+
+    chunk.add(mesh);
+  }
+
   update(delta, speed, playerZ, playerLane) {
     this._playerZ = playerZ;
     this._playerSpeed = speed;
     this.spawnManager.update(delta, speed, playerZ, playerLane);
     this.animateCoins(delta);
+    this.animatePowerUps(delta);
 
     this.animateTrains(delta);
     this._updateLamps(delta);
@@ -626,6 +665,28 @@ export class TrackManager {
             }
           });
         }
+      });
+    });
+  }
+
+  animatePowerUps(delta) {
+    this._coinSparkleTimer += delta;
+    const t = this._coinSparkleTimer;
+    this.chunks.forEach(chunk => {
+      chunk.traverse((child) => {
+        if (!child.userData || child.userData.type !== 'powerup') return;
+        child.rotation.y += 3 * delta;
+        const pulse = 0.5 + 0.5 * Math.sin(t * 3 + child.id);
+        if (child.material) {
+          child.material.emissiveIntensity = 0.2 + 0.25 * pulse;
+        }
+        child.traverse((c) => {
+          if (c.isSprite) {
+            c.material.opacity = 0.2 + 0.2 * pulse;
+            const s = 3 + 1 * pulse;
+            c.scale.set(s, s, 1);
+          }
+        });
       });
     });
   }

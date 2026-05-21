@@ -6,7 +6,7 @@ import { CollisionManager } from './managers/CollisionManager.js';
 import { Chaser } from './entities/Chaser.js';
 import { AudioManager } from './managers/AudioManager.js';
 import { LightingManager } from './managers/LightingManager.js';
-import { SPEED_CONFIG } from './constants.js';
+import { SPEED_CONFIG, POWERUP, POWERUP_CONFIG } from './constants.js';
 
 export class Game {
   constructor() {
@@ -47,6 +47,7 @@ export class Game {
     this.uiFinalScore = document.getElementById('final-score');
     this.uiRestartBtn = document.getElementById('restart-btn');
     this.uiIntroOverlay = document.getElementById('intro-overlay');
+    this.uiPowerUpHud = document.getElementById('powerup-hud');
 
     if (this.uiRestartBtn) this.uiRestartBtn.addEventListener('click', () => this.restart());
 
@@ -76,6 +77,9 @@ export class Game {
     this._handleIntroStart = this._handleIntroStart.bind(this);
     this._transitionDuration = 1.0;
     this._playElapsed = 0;
+    this.scoreMultiplier = 1;
+    this._magnetTimer = 0;
+    this._sneakersTimer = 0;
     this._setupIntro();
   }
 
@@ -97,6 +101,9 @@ export class Game {
     this.score = 0;
     this._playElapsed = 0;
     this.introTimer = 0;
+    this.scoreMultiplier = 1;
+    this._magnetTimer = 0;
+    this._sneakersTimer = 0;
 
     this._introCamPos = new THREE.Vector3(10, 8, -5);
     this._introCamTarget = new THREE.Vector3(0, 1, -5);
@@ -200,9 +207,22 @@ export class Game {
   }
 
   updateUI() {
-    if (this.uiScore) this.uiScore.textContent = `Score: ${this.score}`;
+    if (this.uiScore) {
+      let text = `Score: ${this.score}`;
+      if (this.scoreMultiplier > 1) text += `  ×${this.scoreMultiplier}`;
+      this.uiScore.textContent = text;
+    }
     if (this.uiFinalScore) this.uiFinalScore.textContent = this.score;
     if (this.uiLives) this.uiLives.textContent = this.chaser.active ? '❤️' : '❤️❤️';
+
+    if (this.uiPowerUpHud) {
+      const parts = [];
+      if (this.scoreMultiplier > 1) parts.push(`×${this.scoreMultiplier}`);
+      if (this._magnetTimer > 0) parts.push(`🧲 ${Math.ceil(this._magnetTimer)}s`);
+      if (this._sneakersTimer > 0) parts.push(`👟 ${Math.ceil(this._sneakersTimer)}s`);
+      this.uiPowerUpHud.textContent = parts.join('  ');
+      this.uiPowerUpHud.style.display = parts.length > 0 ? 'block' : 'none';
+    }
   }
 
   triggerGameOver() {
@@ -249,13 +269,38 @@ export class Game {
     const collisionResult = this.collision.checkCollisions(this.player, this.track.chunks);
 
     if (collisionResult.coinsCollected > 0) {
-      this.score += collisionResult.coinsCollected * 10;
+      this.score += collisionResult.coinsCollected * 10 * this.scoreMultiplier;
       this.updateUI();
       this.audio.play('coin', {
         volume: 0.35,
         filter: { type: 'lowpass', frequency: 600, Q: 0.5 },
         compressor: { threshold: -20, ratio: 8 },
       });
+    }
+
+    for (const puType of (collisionResult.collectedPowerUps || [])) {
+      this._activatePowerUp(puType);
+      this.audio.play('coin', {
+        volume: 0.5,
+        filter: { type: 'lowpass', frequency: 1200, Q: 0.3 },
+      });
+    }
+
+    // Decrement power-up timers
+    if (this._magnetTimer > 0) {
+      this._magnetTimer -= delta;
+      if (this._magnetTimer <= 0) {
+        this._magnetTimer = 0;
+      }
+      this._updateMagnet(delta);
+    }
+    if (this._sneakersTimer > 0) {
+      this._sneakersTimer -= delta;
+      if (this._sneakersTimer <= 0) {
+        this.player.jumpForce = 15;
+        this.player.gravity = -45;
+        this._sneakersTimer = 0;
+      }
     }
 
     if (collisionResult.hitType) {
@@ -314,6 +359,48 @@ export class Game {
     }
 
     this.renderer.render(this.scene, this.camera);
+  }
+
+  _activatePowerUp(type) {
+    const cfg = POWERUP_CONFIG[type];
+    if (!cfg) return;
+    switch (type) {
+      case POWERUP.SCORE_2X:
+        this.scoreMultiplier *= 2;
+        break;
+      case POWERUP.SCORE_4X:
+        this.scoreMultiplier *= 4;
+        break;
+      case POWERUP.MAGNET:
+        this._magnetTimer = cfg.duration;
+        break;
+      case POWERUP.SNEAKERS:
+        this.player.jumpForce = 20;
+        this.player.gravity = -40;
+        this._sneakersTimer = cfg.duration;
+        break;
+    }
+    this.updateUI();
+  }
+
+  _updateMagnet(delta) {
+    const radius = 10;
+    const playerPos = this.player.mesh.position;
+    const coinWorldPos = new THREE.Vector3();
+    for (const chunk of this.track.chunks) {
+      chunk.traverse((child) => {
+        if (child.userData?.type !== 'coin' || child.userData.collected) return;
+        child.getWorldPosition(coinWorldPos);
+        const dx = playerPos.x - coinWorldPos.x;
+        const dz = playerPos.z - coinWorldPos.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist < radius && dist > 0.3) {
+          const speed = 25;
+          child.position.x += (dx / dist) * speed * delta;
+          child.position.z += (dz / dist) * speed * delta;
+        }
+      });
+    }
   }
 
   resolveCollision(collisionResult) {

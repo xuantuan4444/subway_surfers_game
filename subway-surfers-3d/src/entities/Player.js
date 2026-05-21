@@ -247,5 +247,7 @@ export class Player {
         this.trainGraceTrainUuid = null;
         this.footstepTimer = 0;
         this.forwardSpeed = SPEED_CONFIG.BASE_SPEED;
+        this.jumpForce = 15;
+        this.gravity = -45;
     }
 }

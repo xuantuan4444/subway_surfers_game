@@ -12,7 +12,7 @@ export class CollisionManager {
 
     checkCollisions(player, trackChunks) {
         if (player.hitCooldown > 0) {
-            return { coinsCollected: 0, hitType: null, hitLane: null };
+            return { coinsCollected: 0, collectedPowerUps: [], hitType: null, hitLane: null };
         }
 
         this.playerBox.setFromObject(player.mesh);
@@ -22,6 +22,7 @@ export class CollisionManager {
         const TOP_LANDING_EPSILON = 0.75;
 
         let coinsCollected = 0;
+        const collectedPowerUps = [];
         let hitType = null;
         let hitLane = null;
 
@@ -45,7 +46,7 @@ export class CollisionManager {
 
                 const type = data.type;
                 // Chỉ check collider & coin. Các mặt đất (train_ramp/train_top/obstacle_ramp...) được raycast xử lý.
-                if (type !== 'coin' && type !== 'obstacle') continue;
+                if (type !== 'coin' && type !== 'obstacle' && type !== 'powerup') continue;
 
                 this.objectBox.setFromObject(obj);
                 if (type === 'coin') {
@@ -58,6 +59,13 @@ export class CollisionManager {
                     obj.visible = false;
                     data.collected = true;
                     coinsCollected++;
+                    continue;
+                }
+
+                if (type === 'powerup') {
+                    obj.visible = false;
+                    data.collected = true;
+                    collectedPowerUps.push(data.powerUpType);
                     continue;
                 }
 
@@ -181,6 +189,6 @@ export class CollisionManager {
             }
         }
 
-        return { coinsCollected, hitType, hitLane };
+        return { coinsCollected, collectedPowerUps, hitType, hitLane };
     }
 }
