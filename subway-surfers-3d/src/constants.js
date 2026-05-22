@@ -8,6 +8,7 @@ export const LANE = {
 
 export const OBSTACLE = {
   LOW_BARRIER: 'low_barrier',
+  JUMP_SLIDE_BARRIER: 'jump_slide_barrier',
   HIGH_BARRIER: 'high_barrier',
   STATIC_TRAIN: 'static_train',
   MOVING_TRAIN: 'moving_train',
@@ -163,6 +164,7 @@ export const POWERUP_CONFIG = {
 
 export const ACTION_DISTANCE = {
   LOW_BARRIER: 4,
+  JUMP_SLIDE_BARRIER: 4,
   HIGH_BARRIER: 4,
   LANE_SWITCH: 6,
   JUMP: 5,

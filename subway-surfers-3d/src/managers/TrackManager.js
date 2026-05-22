@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { LANE, OBSTACLE, CHUNK, POWERUP, POWERUP_CONFIG } from '../constants.js';
 import { LaneUtils } from '../utils/LaneUtils.js';
 import { SpawnManager } from './SpawnManager.js';
+import { createPowerUpVisual, updatePowerUpVisual } from '../entities/PowerUpVisuals.js';
 
 function createGlowDiscTexture() {
   const c = document.createElement('canvas');
@@ -106,6 +107,81 @@ function createBulbGlowTexture() {
   return new THREE.CanvasTexture(c);
 }
 
+function createWoodTexture() {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 256;
+  const ctx = c.getContext('2d');
+
+  const base = ctx.createLinearGradient(0, 0, 256, 0);
+  base.addColorStop(0, '#8a4f24');
+  base.addColorStop(0.35, '#b06d32');
+  base.addColorStop(0.7, '#6f3b18');
+  base.addColorStop(1, '#c17a38');
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, 256, 256);
+
+  for (let y = 0; y < 256; y += 10) {
+    const wave = Math.sin(y * 0.09) * 10;
+    ctx.strokeStyle = y % 20 === 0 ? 'rgba(70,35,12,0.38)' : 'rgba(255,205,130,0.16)';
+    ctx.lineWidth = y % 20 === 0 ? 2 : 1;
+    ctx.beginPath();
+    for (let x = -20; x <= 276; x += 8) {
+      const yy = y + Math.sin((x + wave) * 0.035) * 5;
+      if (x === -20) ctx.moveTo(x, yy);
+      else ctx.lineTo(x, yy);
+    }
+    ctx.stroke();
+  }
+
+  for (let i = 0; i < 7; i++) {
+    const x = 24 + i * 34 + Math.sin(i) * 8;
+    const y = 34 + (i % 3) * 58;
+    const r = 8 + (i % 2) * 4;
+    ctx.strokeStyle = 'rgba(65,30,10,0.35)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(x, y, r * 1.8, r, 0.4, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(x, y, r * 0.8, r * 0.45, 0.4, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  const texture = new THREE.CanvasTexture(c);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(1.4, 0.9);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function createWarningStripeTexture() {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 128;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#f4f1df';
+  ctx.fillRect(0, 0, 256, 128);
+
+  ctx.lineWidth = 34;
+  for (let x = -128; x < 320; x += 64) {
+    ctx.strokeStyle = '#d91f26';
+    ctx.beginPath();
+    ctx.moveTo(x, 148);
+    ctx.lineTo(x + 128, -20);
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = '#262626';
+  ctx.lineWidth = 10;
+  ctx.strokeRect(5, 5, 246, 118);
+
+  const texture = new THREE.CanvasTexture(c);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
 export class TrackManager {
   constructor(scene) {
     this.scene = scene;
@@ -121,6 +197,15 @@ export class TrackManager {
     this._lampTargetIntensity = 0;
     this._lampCurrentIntensity = 0;
     this._coinGlowTex = createCoinGlowTexture();
+    this._woodTex = createWoodTexture();
+    this._barrierStripeTex = createWarningStripeTexture();
+    this._textureLoader = new THREE.TextureLoader();
+    this._powerUpTextures = {
+      [POWERUP.SNEAKERS]: this._textureLoader.load('./textures/shoe.png'),
+    };
+    Object.values(this._powerUpTextures).forEach((texture) => {
+      texture.colorSpace = THREE.SRGBColorSpace;
+    });
     this._coinSparkleTimer = 0;
     this.initChunks();
   }
@@ -323,6 +408,9 @@ export class TrackManager {
       case OBSTACLE.LOW_BARRIER:
         this._spawnLowBarrier(chunk, obs);
         break;
+      case OBSTACLE.JUMP_SLIDE_BARRIER:
+        this._spawnJumpSlideBarrier(chunk, obs);
+        break;
       case OBSTACLE.HIGH_BARRIER:
         this._spawnHighBarrier(chunk, obs);
         break;
@@ -333,18 +421,80 @@ export class TrackManager {
     const xPos = obs.x;
     const zPos = obs.z;
 
-    const barrierWidth = 2.5;
-    const barrierHeight = 1.5;
-    const barrierLength = 1;
+    const barrierWidth = 2.35;
+    const barrierHeight = 1.05;
+    const barrierLength = 0.18;
     const barrierGeo = new THREE.BoxGeometry(barrierWidth, barrierHeight, barrierLength);
-    const barrierMat = new THREE.MeshStandardMaterial({ color: 0xff3333 });
+    const barrierMat = new THREE.MeshStandardMaterial({
+      map: this._barrierStripeTex,
+      roughness: 0.42,
+      metalness: 0.08,
+    });
 
     const barrier = new THREE.Mesh(barrierGeo, barrierMat);
-    barrier.position.set(xPos, barrierHeight / 2, zPos);
+    barrier.position.set(xPos, barrierHeight / 2 + 0.08, zPos);
     barrier.castShadow = true;
     barrier.receiveShadow = true;
     barrier.userData = { type: 'obstacle', lane: obs.lane, isGround: true };
     chunk.add(barrier);
+
+    const capMat = new THREE.MeshStandardMaterial({ color: 0x20242a, roughness: 0.35, metalness: 0.35 });
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(barrierWidth + 0.14, 0.12, barrierLength + 0.08), capMat);
+    cap.position.set(xPos, barrierHeight + 0.2, zPos);
+    cap.castShadow = true;
+    cap.receiveShadow = true;
+    chunk.add(cap);
+  }
+
+  _spawnJumpSlideBarrier(chunk, obs) {
+    const xPos = obs.x;
+    const zPos = obs.z;
+
+    const barrierGroup = new THREE.Group();
+    const metalMat = new THREE.MeshStandardMaterial({ color: 0x20242a, roughness: 0.35, metalness: 0.45 });
+    const yellowMat = new THREE.MeshStandardMaterial({ color: 0xffc400, roughness: 0.35, metalness: 0.2 });
+    const stripeMat = new THREE.MeshStandardMaterial({
+      map: this._barrierStripeTex,
+      roughness: 0.42,
+      metalness: 0.08,
+    });
+
+    const postGeo = new THREE.BoxGeometry(0.2, 1.95, 0.22);
+    const postL = new THREE.Mesh(postGeo, metalMat);
+    postL.position.set(-1.2, 1.2, 0);
+    postL.castShadow = true;
+    postL.receiveShadow = true;
+    barrierGroup.add(postL);
+
+    const postR = postL.clone();
+    postR.position.set(1.2, 1.2, 0);
+    postR.castShadow = true;
+    postR.receiveShadow = true;
+    barrierGroup.add(postR);
+
+    const topRail = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.18, 0.28), yellowMat);
+    topRail.position.set(0, 2.15, 0);
+    topRail.castShadow = true;
+    topRail.receiveShadow = true;
+    barrierGroup.add(topRail);
+
+    const boardGeo = new THREE.BoxGeometry(2.2, 0.58, 0.16);
+    const board = new THREE.Mesh(boardGeo, stripeMat);
+    board.position.set(0, 1.78, -0.05);
+    board.castShadow = true;
+    board.receiveShadow = true;
+    board.userData = { type: 'obstacle', lane: obs.lane, requiresSlide: true };
+    barrierGroup.add(board);
+
+    const lowerRail = new THREE.Mesh(new THREE.BoxGeometry(2.15, 0.1, 0.22), metalMat);
+    lowerRail.position.set(0, 1.42, 0);
+    lowerRail.castShadow = true;
+    lowerRail.receiveShadow = true;
+    barrierGroup.add(lowerRail);
+
+    barrierGroup.position.set(xPos, 0, zPos);
+    barrierGroup.userData = { type: 'obstacle', lane: obs.lane, requiresSlide: true };
+    chunk.add(barrierGroup);
   }
 
   _spawnHighBarrier(chunk, obs) {
@@ -352,28 +502,46 @@ export class TrackManager {
     const zPos = obs.z;
 
     const barrierGroup = new THREE.Group();
-    const uMat = new THREE.MeshStandardMaterial({ color: 0xffaa00, roughness: 0.4 });
+    const metalMat = new THREE.MeshStandardMaterial({ color: 0x20242a, roughness: 0.35, metalness: 0.45 });
+    const yellowMat = new THREE.MeshStandardMaterial({ color: 0xffc400, roughness: 0.35, metalness: 0.2 });
+    const stripeMat = new THREE.MeshStandardMaterial({
+      map: this._barrierStripeTex,
+      roughness: 0.42,
+      metalness: 0.08,
+    });
 
-    const pillarGeo = new THREE.BoxGeometry(0.3, 1.4, 0.3);
-    const pillarL = new THREE.Mesh(pillarGeo, uMat);
-    pillarL.position.set(-1.1, 0.7, 0);
-    pillarL.castShadow = true;
-    pillarL.receiveShadow = true;
-    barrierGroup.add(pillarL);
-    const pillarR = pillarL.clone();
-    pillarR.position.set(1.1, 0.7, 0);
-    pillarR.castShadow = true;
-    pillarR.receiveShadow = true;
-    barrierGroup.add(pillarR);
+    const postGeo = new THREE.BoxGeometry(0.24, 3.95, 0.24);
+    const postL = new THREE.Mesh(postGeo, metalMat);
+    postL.position.set(-1.28, 2.05, 0);
+    postL.castShadow = true;
+    postL.receiveShadow = true;
+    barrierGroup.add(postL);
 
-    const boardGeo = new THREE.BoxGeometry(2.5, 2.0, 0.8);
-    const boardMat = new THREE.MeshStandardMaterial({ color: 0xffaa00, roughness: 0.4 });
-    const board = new THREE.Mesh(boardGeo, boardMat);
-    board.position.set(0, 2.5, 0);
+    const postR = postL.clone();
+    postR.position.set(1.28, 2.05, 0);
+    postR.castShadow = true;
+    postR.receiveShadow = true;
+    barrierGroup.add(postR);
+
+    const topRail = new THREE.Mesh(new THREE.BoxGeometry(2.95, 0.24, 0.36), yellowMat);
+    topRail.position.set(0, 4.08, 0);
+    topRail.castShadow = true;
+    topRail.receiveShadow = true;
+    barrierGroup.add(topRail);
+
+    const boardGeo = new THREE.BoxGeometry(2.72, 2.35, 0.28);
+    const board = new THREE.Mesh(boardGeo, stripeMat);
+    board.position.set(0, 2.78, -0.05);
     board.castShadow = true;
     board.receiveShadow = true;
     board.userData = { type: 'obstacle', lane: obs.lane, requiresSlide: true };
     barrierGroup.add(board);
+
+    const lowerRail = new THREE.Mesh(new THREE.BoxGeometry(2.45, 0.14, 0.24), metalMat);
+    lowerRail.position.set(0, 1.48, 0);
+    lowerRail.castShadow = true;
+    lowerRail.receiveShadow = true;
+    barrierGroup.add(lowerRail);
 
     barrierGroup.position.set(xPos, 0, zPos);
     barrierGroup.userData = { type: 'obstacle', lane: obs.lane, requiresSlide: true };
@@ -561,18 +729,29 @@ export class TrackManager {
 
   _spawnPatternPowerUp(chunk, pu) {
     const cfg = POWERUP_CONFIG[pu.powerUpType] || POWERUP_CONFIG[POWERUP.SCORE_2X];
-    const geo = new THREE.SphereGeometry(0.5, 12, 12);
-    const mat = new THREE.MeshStandardMaterial({
-      color: cfg.color,
-      emissive: cfg.emissive,
-      emissiveIntensity: 0.3,
-      metalness: 0.3,
-      roughness: 0.4,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.castShadow = true;
-    mesh.position.set(pu.x, 2.2, pu.z);
+    let mesh = createPowerUpVisual(pu.powerUpType, cfg);
+
+    if (!mesh) {
+      const texture = this._powerUpTextures[pu.powerUpType] || this._powerUpTextures[POWERUP.SNEAKERS];
+      const material = new THREE.SpriteMaterial({
+        map: texture,
+        color: 0xffffff,
+        transparent: true,
+        depthWrite: false,
+      });
+      mesh = new THREE.Sprite(material);
+      const scale = 1.35;
+      mesh.scale.set(scale, scale, 1);
+      mesh.userData.baseScale = scale;
+    } else {
+      const scale = pu.powerUpType === POWERUP.MAGNET ? 0.72 : 1.2;
+      mesh.scale.set(scale, scale, scale);
+      mesh.userData.powerUpVisual.baseScale = scale;
+    }
+
+    mesh.position.set(pu.x, pu.powerUpType === POWERUP.MAGNET ? 2.45 : 2.2, pu.z);
     mesh.userData = {
+      ...mesh.userData,
       type: 'powerup',
       powerUpType: pu.powerUpType,
     };
@@ -588,6 +767,7 @@ export class TrackManager {
     const glow = new THREE.Sprite(glowMat);
     glow.scale.set(4, 4, 1);
     glow.position.y = 0;
+    glow.userData = { isPowerUpGlow: true };
     mesh.add(glow);
 
     chunk.add(mesh);
@@ -675,18 +855,33 @@ export class TrackManager {
     this.chunks.forEach(chunk => {
       chunk.traverse((child) => {
         if (!child.userData || child.userData.type !== 'powerup') return;
-        child.rotation.y += 3 * delta;
+        if (updatePowerUpVisual(child, delta, t)) {
+          for (const c of child.children) {
+            if (c.userData?.isPowerUpGlow) {
+              const pulse = 0.5 + 0.5 * Math.sin(t * 3 + child.id);
+              c.material.opacity = 0.2 + 0.2 * pulse;
+              const s = 3 + 1 * pulse;
+              c.scale.set(s, s, 1);
+            }
+          }
+          return;
+        }
+
         const pulse = 0.5 + 0.5 * Math.sin(t * 3 + child.id);
         if (child.material) {
-          child.material.emissiveIntensity = 0.2 + 0.25 * pulse;
+          child.material.rotation += 2.5 * delta;
+          child.material.opacity = 0.9 + 0.1 * pulse;
         }
-        child.traverse((c) => {
-          if (c.isSprite) {
+        const baseScale = child.userData.baseScale || 1.35;
+        const iconScale = baseScale * (1 + 0.08 * pulse);
+        child.scale.set(iconScale, iconScale, 1);
+        for (const c of child.children) {
+          if (c.userData?.isPowerUpGlow) {
             c.material.opacity = 0.2 + 0.2 * pulse;
             const s = 3 + 1 * pulse;
             c.scale.set(s, s, 1);
           }
-        });
+        }
       });
     });
   }

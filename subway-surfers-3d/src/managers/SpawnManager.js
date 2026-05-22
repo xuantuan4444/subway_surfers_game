@@ -240,6 +240,7 @@ export class SpawnManager {
     for (const row of rows) {
       for (const obs of row.obstacles) {
         if (obs.type === OBSTACLE.LOW_BARRIER) this._lastActionTags.push({ tag: 'jump', z: chunkZ + row.z });
+        if (obs.type === OBSTACLE.JUMP_SLIDE_BARRIER) this._lastActionTags.push({ tag: 'jump_slide', z: chunkZ + row.z });
         if (obs.type === OBSTACLE.HIGH_BARRIER) this._lastActionTags.push({ tag: 'slide', z: chunkZ + row.z });
       }
     }
@@ -299,10 +300,14 @@ export class SpawnManager {
       if (!obsConfig) continue;
 
       const xPos = LaneUtils.laneToWorldX(lane);
-      const obstacle = { lane, x: xPos, z: rowZ, type: obsConfig.type, config: obsConfig };
+      let obstacleType = obsConfig.type;
+      if (obstacleType === OBSTACLE.HIGH_BARRIER && Math.random() < 0.45) {
+        obstacleType = OBSTACLE.JUMP_SLIDE_BARRIER;
+      }
+      const obstacle = { lane, x: xPos, z: rowZ, type: obstacleType, config: obsConfig };
       obstacles.push(obstacle);
 
-      if (obsConfig.type === OBSTACLE.STATIC_TRAIN || obsConfig.type === OBSTACLE.MOVING_TRAIN) {
+      if (obstacleType === OBSTACLE.STATIC_TRAIN || obstacleType === OBSTACLE.MOVING_TRAIN) {
         const cars = obsConfig.cars || (1 + Math.floor(Math.random() * 3));
         const hasRamp = obsConfig.hasRamp !== undefined ? obsConfig.hasRamp : (Math.random() > 0.4);
         trains.push({
@@ -548,10 +553,9 @@ export class SpawnManager {
 
   _pickPowerUpType() {
     const roll = Math.random();
-    if (roll < 0.55) return POWERUP.SCORE_2X;
+    if (roll < 0.5) return POWERUP.SCORE_2X;
     if (roll < 0.75) return POWERUP.MAGNET;
-    if (roll < 0.95) return POWERUP.SNEAKERS;
-    return POWERUP.SCORE_4X;
+    return POWERUP.SNEAKERS;
   }
 
   _placePowerUps(chunkZ, coins) {
