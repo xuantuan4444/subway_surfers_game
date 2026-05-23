@@ -24,6 +24,7 @@ export class SpawnManager {
     this._lastActionTags = [];
     this._movingTrainLaneCount = { 0: 0, 1: 0, 2: 0 };
     this._lastPowerUpZ = -999;
+    this._retroactiveClearList = [];
   }
 
   update(delta, speed, playerZ, playerLane) {
@@ -220,6 +221,47 @@ export class SpawnManager {
       });
     }
 
+    // Retroactive clearance: clear obstacles in EXISTING chunks that overlap with this chunk's trains
+    for (const train of trains) {
+      const carCount = train.cars || 1;
+      const halfLen = CAR_LENGTH / 2;
+      const trainBaseZ = chunkZ + train.z;
+      const bodyStartZ = trainBaseZ - halfLen - (carCount - 1) * CAR_LENGTH;
+      const bodyEndZ = trainBaseZ + halfLen + (train.isMoving ? 0 : RAMP_LENGTH);
+      const clearStartZ = bodyStartZ - 12;
+      const clearEndZ = bodyEndZ + 16;
+      const adjLanes = LaneUtils.getAdjacentLanes(train.lane);
+      for (const [otherUuid, otherData] of Object.entries(this._currentChunkPatterns)) {
+        if (otherUuid === chunk.uuid) continue;
+        if (otherData.chunkZ === undefined) continue;
+        let modified = false;
+        for (const row of otherData.rows) {
+          const rowWorldZ = otherData.chunkZ + row.z;
+          if (rowWorldZ >= clearStartZ && rowWorldZ <= clearEndZ) {
+            const before = row.obstacles.length;
+            row.obstacles = row.obstacles.filter(o => o.lane !== train.lane);
+            if (row.obstacles.length !== before) modified = true;
+          }
+          if (adjLanes.length > 0 && rowWorldZ >= bodyStartZ && rowWorldZ <= bodyEndZ) {
+            const before = row.obstacles.length;
+            row.obstacles = row.obstacles.filter(o => !adjLanes.includes(o.lane));
+            if (row.obstacles.length !== before) modified = true;
+          }
+        }
+        if (modified) {
+          this._retroactiveClearList.push({
+            chunkUuid: otherUuid,
+            trainLane: train.lane,
+            adjLanes,
+            clearStartZ,
+            clearEndZ,
+            bodyStartZ,
+            bodyEndZ,
+          });
+        }
+      }
+    }
+
     // Cross-chunk clearance: clear obstacles in this chunk that overlap with train extents from OTHER chunks
     for (const ext of this._trainExtents) {
       if (ext.chunkUuid === chunk.uuid) continue;
@@ -268,7 +310,7 @@ export class SpawnManager {
     }
 
     // Coin trail: dense single-lane trail with obstacle detours
-    const coinTrail = this._buildCoinTrail(chunkZ, numRows, rows, trains);
+    const coinTrail = this._buildCoinTrail(chunkZ, numRows, rows, trains, chunk.uuid);
     coins.push(...coinTrail);
 
     // Power-ups: replace some coin positions
@@ -277,7 +319,7 @@ export class SpawnManager {
     this.lastPattern = prevPattern;
     this.lastRowZ = prevWorldZ;
 
-    const result = { rows, coins, trains, patternCount: numRows, powerUps };
+    const result = { rows, coins, trains, patternCount: numRows, powerUps, chunkZ };
     this._currentChunkPatterns[chunk.uuid] = result;
     return result;
   }
@@ -373,7 +415,7 @@ export class SpawnManager {
     return true;
   }
 
-  _buildCoinTrail(chunkZ, numRows, rows, trains) {
+  _buildCoinTrail(chunkZ, numRows, rows, trains, currentChunkUuid) {
     const coins = [];
     const chunkLen = CHUNK.LENGTH;
     const SPACING = 6;
@@ -424,6 +466,16 @@ export class SpawnManager {
       for (const adjLane of ALL_LANES) {
         if (adjLane === train.lane) continue;
         blockedRanges[adjLane].push({ start: trainStart, end: trainEnd });
+      }
+    }
+
+    // Cross-chunk train extents (trains from previous chunks)
+    for (const ext of this._trainExtents) {
+      if (ext.chunkUuid === currentChunkUuid) continue;
+      blockedRanges[ext.lane].push({ start: ext.bodyStartZ, end: ext.bodyEndZ });
+      for (const adjLane of ALL_LANES) {
+        if (adjLane === ext.lane) continue;
+        blockedRanges[adjLane].push({ start: ext.bodyStartZ, end: ext.bodyEndZ });
       }
     }
 
@@ -617,6 +669,12 @@ export class SpawnManager {
     return data ? data.coins || [] : [];
   }
 
+  getRetroactiveClearList() {
+    const list = this._retroactiveClearList;
+    this._retroactiveClearList = [];
+    return list;
+  }
+
   reset() {
     this.difficulty.reset();
     this.lastPattern = null;
@@ -632,5 +690,6 @@ export class SpawnManager {
     this._coinShiftsSinceChange = 0;
     this._movingTrainLaneCount = { 0: 0, 1: 0, 2: 0 };
     this._lastPowerUpZ = -999;
+    this._retroactiveClearList = [];
   }
 }

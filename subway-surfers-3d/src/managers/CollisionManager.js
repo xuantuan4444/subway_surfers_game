@@ -11,10 +11,6 @@ export class CollisionManager {
     }
 
     checkCollisions(player, trackChunks) {
-        if (player.hitCooldown > 0) {
-            return { coinsCollected: 0, collectedPowerUps: [], hitType: null, hitLane: null };
-        }
-
         this.playerBox.setFromObject(player.mesh);
         this.playerBox.expandByScalar(-0.15);
 

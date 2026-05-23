@@ -39,8 +39,6 @@ export class Game {
     this.collision = new CollisionManager();
     this.chaser = new Chaser(this.scene);
 
-    this._prevChaserActive = this.chaser.active;
-
     this.uiScore = document.getElementById('score');
     this.uiLives = document.getElementById('lives');
     this.uiGameOver = document.getElementById('game-over');
@@ -57,6 +55,15 @@ export class Game {
     this.audio.loadManifest({
       sfx: {
         coin: 'coin.mp3',
+        click: 'Click.wav',
+        death: 'Death.mp3',
+        landing: 'Landing.wav',
+        sideHit: 'SideHit.wav',
+        powerup: 'Powerup.mp3',
+        trainLanding: 'TrainLanding.wav',
+        alo1: 'alo 1.mp3',
+        alo2: 'alo 2.mp3',
+        alo3: 'alo 3.mp3',
         step1: 'Footsteps 1.mp3',
         step2: 'Footsteps 2.mp3',
         step3: 'Footsteps 3.mp3',
@@ -80,12 +87,15 @@ export class Game {
     this.scoreMultiplier = 1;
     this._magnetTimer = 0;
     this._sneakersTimer = 0;
+    this._aloIndex = 0;
+    this._sideHitCooldown = 0;
     this._setupIntro();
   }
 
   _handleIntroStart(e) {
     if (e.type === 'keydown' && e.code !== 'Space') return;
     e.preventDefault();
+    this.audio.play('click', { volume: 0.5 });
     this._startGame();
   }
 
@@ -105,7 +115,7 @@ export class Game {
     this._magnetTimer = 0;
     this._sneakersTimer = 0;
 
-    this._introCamPos = new THREE.Vector3(10, 8, -5);
+    this._introCamPos = new THREE.Vector3(4, 3, -5);
     this._introCamTarget = new THREE.Vector3(0, 1, -5);
     this.camera.position.copy(this._introCamPos);
     this.camera.lookAt(this._introCamTarget);
@@ -117,7 +127,7 @@ export class Game {
 
     this.chaser.deactivate();
     this.chaser.mesh.visible = true;
-    this.chaser.mesh.position.set(0, 1.4, 2);
+    this.chaser.mesh.position.set(0, 0, -3);
     this.chaser.active = true;
     this._prevChaserActive = false;
 
@@ -146,16 +156,20 @@ export class Game {
     if (this.player.isJumping) {
       this.player.mesh.position.y += this.player.verticalVelocity * delta;
       this.player.verticalVelocity += this.player.gravity * delta;
-      if (this.player.mesh.position.y <= 1) {
-        this.player.mesh.position.y = 1;
+      if (this.player.mesh.position.y <= 0) {
+        this.player.mesh.position.y = 0;
         this.player.isJumping = false;
         this.player.verticalVelocity = 0;
       }
     }
 
-    this.chaser.mesh.position.z += (-1 - this.chaser.mesh.position.z) * 0.25 * delta;
     this.chaser.mesh.position.x = this.player.mesh.position.x;
-    this.chaser.mesh.lookAt(this.player.mesh.position.x, 1.5, this.player.mesh.position.z);
+    this.chaser.mesh.position.y = this.player.mesh.position.y;
+    {
+        const dx = this.player.mesh.position.x - this.chaser.mesh.position.x;
+        const dz = this.player.mesh.position.z - this.chaser.mesh.position.z;
+        this.chaser.mesh.rotation.y = Math.atan2(dx, dz);
+    }
 
     this.lighting.update(delta, this.player.mesh.position.z);
     this.track.setLampIntensity(this.lighting.darkness);
@@ -178,21 +192,13 @@ export class Game {
     this.player.reset();
     this.track.reset();
 
-    // Chaser chạy forward (theo player) nhưng chậm dần + fade dần
-    this.chaser.deactivate();
-    this.chaser.mesh.visible = true;
-    this._chaserZ = this.player.mesh.position.z + 8;
+    this._prevChaserActive = true;
     this.chaser.mesh.position.set(
       this.player.mesh.position.x,
-      1.4,
-      this._chaserZ
+      this.player.mesh.position.y,
+      this.player.mesh.position.z + 2
     );
-    this.chaser.active = true;
-    this.chaser.state = this.chaser.STATE.INACTIVE;
-    this._prevChaserActive = true;
-    this.chaser.mesh.traverse((child) => {
-      if (child.isMesh) child.material.transparent = true;
-    });
+    this._chaserTransitionOffset = 2;
 
     this.clock.start();
   }
@@ -228,6 +234,7 @@ export class Game {
 
   triggerGameOver() {
     this.currentState = 'game_over';
+    this.audio.play('death', { volume: 0.6 });
     if (this.uiGameOver) this.uiGameOver.style.display = 'flex';
     if (this.uiFinalScore) this.uiFinalScore.textContent = this.score;
   }
@@ -253,14 +260,13 @@ export class Game {
       SPEED_CONFIG.MAX_SPEED
     );
     this.player.setForwardSpeed(currentSpeed);
-    this.chaser.setSpeedMultiplier(0.3 + 0.7 * (currentSpeed / SPEED_CONFIG.BASE_SPEED));
 
     this.lighting.update(delta, this.player.mesh.position.z);
     this.track.setLampIntensity(this.lighting.darkness);
     this.track.update(delta, currentSpeed, this.player.mesh.position.z, this.player.currentLane);
     this.player.update(delta, this.track.chunks);
 
-    this.chaser.update(delta, this.player.mesh);
+    this.chaser.update(delta, this.player.mesh, currentSpeed, this.player);
 
     if (this._prevChaserActive !== this.chaser.active) {
       this._prevChaserActive = this.chaser.active;
@@ -281,10 +287,7 @@ export class Game {
 
     for (const puType of (collisionResult.collectedPowerUps || [])) {
       this._activatePowerUp(puType);
-      this.audio.play('coin', {
-        volume: 0.5,
-        filter: { type: 'lowpass', frequency: 1200, Q: 0.3 },
-      });
+      this.audio.play('powerup', { volume: 0.6 });
     }
 
     // Decrement power-up timers
@@ -300,15 +303,17 @@ export class Game {
       if (this._sneakersTimer <= 0) {
         this.player.jumpForce = 15;
         this.player.gravity = -45;
+        this.player.hasSneakers = false;
         this._sneakersTimer = 0;
       }
     }
+    if (this._sideHitCooldown > 0) this._sideHitCooldown -= delta;
 
     if (collisionResult.hitType) {
       this.resolveCollision(collisionResult);
     }
 
-    const effectivePlayerY = Math.max(this.player.mesh.position.y, this.player.currentGroundY + 1);
+    const effectivePlayerY = Math.max(this.player.mesh.position.y + 1, this.player.currentGroundY + 1);
     const camOffset = effectivePlayerY - 1;
     const playerCamEffect = (camOffset > 0.05 ? camOffset : 0) * 0.4;
 
@@ -332,27 +337,25 @@ export class Game {
         new THREE.Vector3().lerpVectors(this._introCamTarget, gameCamTarget, ease)
       );
 
-      // Chaser chạy forward chậm dần + mờ dần
-      const chaserT = Math.min(1, t * 1.3);
-      const chaserSpeed = 18 * Math.max(0, 1 - chaserT * 1.1);
-      this._chaserZ -= chaserSpeed * delta;
+      if (t < 0.15) {
+        this._chaserTransitionOffset = 2;
+      } else {
+        const phase = (t - 0.15) / 0.85;
+        const ease2 = phase * phase * (3 - 2 * phase);
+        this._chaserTransitionOffset = THREE.MathUtils.lerp(2, this.chaser.idleDistance, ease2);
+      }
       this.chaser.mesh.position.x = this.player.mesh.position.x;
-      this.chaser.mesh.position.z = this._chaserZ;
-      const chaserOpacity = 1 - chaserT;
-      this.chaser.mesh.traverse((child) => {
-        if (child.isMesh) child.material.opacity = chaserOpacity;
-      });
+      this.chaser.mesh.position.y = this.player.mesh.position.y;
+      this.chaser.mesh.position.z = this.player.mesh.position.z + this._chaserTransitionOffset;
+      {
+        const dx = this.player.mesh.position.x - this.chaser.mesh.position.x;
+        const dz = this.player.mesh.position.z - this.chaser.mesh.position.z;
+        this.chaser.mesh.rotation.y = Math.atan2(dx, dz);
+      }
 
       if (t >= 1) {
         this.currentState = 'playing';
-        this.chaser.mesh.traverse((child) => {
-          if (child.isMesh) {
-            child.material.transparent = false;
-            child.material.opacity = 1;
-          }
-        });
         this.chaser.deactivate();
-        this._prevChaserActive = false;
       }
     } else {
       this.camera.position.copy(gameCamPos);
@@ -378,6 +381,7 @@ export class Game {
       case POWERUP.SNEAKERS:
         this.player.jumpForce = 20;
         this.player.gravity = -40;
+        this.player.hasSneakers = true;
         this._sneakersTimer = cfg.duration;
         break;
     }
@@ -413,11 +417,16 @@ export class Game {
     }
 
     if (hitType === 'side') {
-      if (this.chaser.active) {
+      if (this.chaser.active && this.chaser.state === this.chaser.STATE.CHASING) {
         this.triggerGameOver();
         return;
       }
-      this.chaser.activate(this.player.mesh);
+      if (this._sideHitCooldown > 0) return;
+      this._sideHitCooldown = 1;
+      this.audio.play('sideHit', { volume: 0.5 });
+      this.audio.play(`alo${this._aloIndex + 1}`, { volume: 0.6 });
+      this._aloIndex = (this._aloIndex + 1) % 3;
+      this.chaser.activate();
       this.updateUI();
       this.player.onSideHit(hitLane);
     }

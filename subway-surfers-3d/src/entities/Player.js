@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { SPEED_CONFIG } from '../constants.js';
+import { ModelManager } from '../utils/ModelManager.js';
 
 export class Player {
     constructor(scene, audio = null) {
@@ -17,20 +18,67 @@ export class Player {
         this.isSliding = false;
         this.slideDuration = 0.4;
         this.slideTimer = 0;
+        this.slideScale = 1;
 
-        this.geometry = new THREE.BoxGeometry(1, 2, 1);
-        this.material = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
-        this.mesh = new THREE.Mesh(this.geometry, this.material);
-        this.mesh.position.set(0, 1, -5);
-        this.mesh.castShadow = true;
-        this.mesh.receiveShadow = true;
+        this.mesh = new THREE.Group();
+
+        const model = ModelManager.get('Player');
+        if (model) {
+            model.rotation.y = Math.PI;
+
+            model.traverse((child) => {
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                }
+            });
+
+            this.mesh.add(model);
+            this._model = model;
+
+            this.mesh.updateMatrixWorld(true, true);
+            const box = new THREE.Box3().setFromObject(model);
+            const size = box.getSize(new THREE.Vector3());
+            const minY = box.min.y;
+            console.log(`[Player] Actual AABB: ${size.x.toFixed(3)} x ${size.y.toFixed(3)} x ${size.z.toFixed(3)}  minY=${minY.toFixed(3)}`);
+
+            const targetHeight = 2;
+            const scale = targetHeight / Math.max(size.y, 0.01);
+            model.scale.set(scale, scale, scale);
+            model.position.y = -minY * scale;
+
+            const animations = ModelManager.getAnimations('Player');
+            if (animations.length > 0) {
+                this.mixer = new THREE.AnimationMixer(model);
+                const action = this.mixer.clipAction(animations[0]);
+                action.play();
+            } else {
+                this.mixer = null;
+            }
+        } else {
+            const geometry = new THREE.BoxGeometry(1, 2, 1);
+            const material = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
+            const fallback = new THREE.Mesh(geometry, material);
+            fallback.position.y = 1;
+            fallback.castShadow = true;
+            fallback.receiveShadow = true;
+            this.mesh.add(fallback);
+            this._model = fallback;
+            this.mixer = null;
+        }
+
+        this.mesh.position.set(0, 0, -5); 
         this.scene.add(this.mesh);
+
+        const proxyGeo = new THREE.BoxGeometry(1, 2, 1);
+        const proxyMat = new THREE.MeshBasicMaterial({ visible: false });
+        this._collisionProxy = new THREE.Mesh(proxyGeo, proxyMat);
+        this._collisionProxy.position.y = 1;
+        this.mesh.add(this._collisionProxy);
 
         this.forwardSpeed = 18;
         this.returningToLane = false;
         this.returnTimer = 0;
-        this.hitCooldown = 0;
-
         this.raycaster = new THREE.Raycaster();
         this.raycaster.far = 15;
         this.currentGroundY = 0;
@@ -39,15 +87,23 @@ export class Player {
 
         this.trainGraceTimer = 0;
         this.trainGraceTrainUuid = null;
+        this._wasOnTrainBeforeJump = false;
 
         this.footstepTimer = 0;
         this.footstepInterval = 0.35;
+        this.isGrounded = true;
+        this.hasSneakers = false;
+        this._wasInAir = false;
     }
 
     _setOpacity(opacity) {
-        if (this.material) {
-            this.material.transparent = opacity < 1;
-            this.material.opacity = opacity;
+        if (this._model) {
+            this._model.traverse((child) => {
+                if (child.isMesh) {
+                    child.material.transparent = opacity < 1;
+                    child.material.opacity = opacity;
+                }
+            });
         }
     }
 
@@ -75,11 +131,13 @@ export class Player {
         if (this.isSliding) {
             this.isSliding = false; 
             this.slideTimer = 0;
-            this.mesh.scale.y = 1; 
-            this.mesh.position.y = this.currentGroundY + 1; 
+            this.slideScale = 1;
+            this.mesh.position.y = this.currentGroundY; 
             this.verticalVelocity = 0;
         }
-        if (!this.isJumping && !this.returningToLane) {
+        const atGroundLevel = Math.abs(this.mesh.position.y - this.currentGroundY) < 0.3;
+        if (atGroundLevel && this.isGrounded && !this.isJumping && !this.returningToLane) {
+            this._wasOnTrainBeforeJump = this.trainGraceTimer > 0;
             this.verticalVelocity = this.jumpForce;
             this.isJumping = true;
             if (this.audio) this.audio.playRandom('swipe');
@@ -93,7 +151,7 @@ export class Player {
         if (!this.isSliding && !this.returningToLane) {
             this.isSliding = true;
             this.slideTimer = this.slideDuration;
-            this.mesh.scale.y = 0.5;
+            this.slideScale = 0.5;
             if (this.audio) this.audio.playRandom('swipe');
         }
     }
@@ -106,7 +164,6 @@ export class Player {
         if (this.returningToLane) return;
         this.returningToLane = true;
         this.returnTimer = 0.4;
-        this.hitCooldown = 0.6;
         this._setOpacity(0.5);
     }
 
@@ -123,7 +180,8 @@ export class Player {
     }
 
     update(delta, trackChunks) {
-        if (this.hitCooldown > 0) this.hitCooldown -= delta;
+        if (this.mixer) this.mixer.update(delta);
+
         if (this.trainGraceTimer > 0) this.trainGraceTimer -= delta;
 
         if (this.returningToLane) {
@@ -156,12 +214,22 @@ export class Player {
         let closestObject = null;
         for (const hit of intersects) {
             if (hit.point.y <= this.mesh.position.y + 1 && hit.distance < closestDist) {
+                if (this.isJumping && !this._wasOnTrainBeforeJump && !this.hasSneakers) {
+                    const profile = hit.object?.userData?.walkableProfile;
+                    if (profile?.kind === 'train') {
+                        const onFlatRoof = profile.rampLength <= 0 ||
+                            hit.point.y >= (profile.trainHeight ?? 4) - 0.1;
+                        if (onFlatRoof) continue;
+                    }
+                }
                 closestDist = hit.distance;
                 detectedY = hit.point.y;
                 foundGround = true;
                 closestObject = hit.object;
             }
         }
+
+        this.isGrounded = foundGround;
 
         if (foundGround) {
             this.currentGroundY = detectedY;
@@ -172,7 +240,7 @@ export class Player {
                 this.trainGraceTrainUuid = closestObject.uuid;
             }
         }
-        const targetY = this.currentGroundY + 1;
+        const targetY = this.currentGroundY;
 
         if (this.isJumping) {
             this.mesh.position.y += this.verticalVelocity * delta;
@@ -192,17 +260,24 @@ export class Player {
             }
         }
 
+        const isOnGround = Math.abs(this.mesh.position.y - targetY) < 0.1 && !this.isJumping;
+        if (this._wasInAir && isOnGround) {
+            const onTrain = closestObject?.userData?.walkableProfile?.kind === 'train';
+            if (this.audio) this.audio.play(onTrain ? 'trainLanding' : 'landing', { volume: onTrain ? 0.4 : 0.25 });
+        }
+        this._wasInAir = !isOnGround;
+
         if (this.isSliding) {
             this.slideTimer -= delta;
             this.mesh.position.y = THREE.MathUtils.lerp(
                 this.mesh.position.y,
-                this.currentGroundY + 0.5,
+                this.currentGroundY,
                 15 * delta
             );
             if (this.slideTimer <= 0) {
                 this.isSliding = false;
-                this.mesh.scale.y = 1;
-                this.mesh.position.y = this.currentGroundY + 1;
+                this.slideScale = 1;
+                this.mesh.position.y = this.currentGroundY;
                 this.verticalVelocity = 0;
             }
         }
@@ -229,20 +304,24 @@ export class Player {
         this.currentLane = 1; 
         this.previousLane = 1; 
         this.targetX = 0;
-        this.mesh.position.set(0, 1, -5); 
+        this.mesh.position.set(0, 0, -5);
         this.verticalVelocity = 0;
         this.isJumping = false; 
         this.isSliding = false; 
         this.returningToLane = false; 
-        this.hitCooldown = 0;
-        this.mesh.scale.y = 1; 
+        this.mesh.scale.y = 1;
+        this.slideScale = 1;
         this.currentGroundY = 0;
         this.lastValidGroundY = 0;
         this._setOpacity(1);
         this.groundObjects = [];
         this.trainGraceTimer = 0;
         this.trainGraceTrainUuid = null;
+        this._wasOnTrainBeforeJump = false;
         this.footstepTimer = 0;
+        this.isGrounded = true;
+        this.hasSneakers = false;
+        this._wasInAir = false;
         this.forwardSpeed = SPEED_CONFIG.BASE_SPEED;
         this.jumpForce = 15;
         this.gravity = -45;

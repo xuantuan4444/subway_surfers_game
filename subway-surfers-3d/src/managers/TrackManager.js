@@ -224,8 +224,8 @@ export class TrackManager {
       modelGroup.position.set(wallX, 0, lightZ);
       group.add(modelGroup);
 
-      // Vị trí bóng đèn (đỉnh cột)
-      const bulbX = wallX;
+      // Vị trí bóng đèn (đầu cần, không phải tâm trụ)
+      const bulbX = wallX - side * 1.673;
       const bulbGlow = new THREE.Sprite(
         new THREE.SpriteMaterial({
           map: bulbGlowTex,
@@ -241,7 +241,7 @@ export class TrackManager {
       bulbGlow.position.set(bulbX, bulbY, lightZ);
       group.add(bulbGlow);
 
-      const spotTarget = new THREE.Vector3(0, 0, lightZ);
+      const spotTarget = new THREE.Vector3(-side * 1.5, 0, lightZ);
       const light = new THREE.SpotLight(0xffdd88, 0, 55, 1.3, 0.85, 1);
       light.position.set(bulbX, bulbY, lightZ);
       light.target.position.copy(spotTarget);
@@ -399,31 +399,27 @@ export class TrackManager {
     const CAR_LENGTH = 20;
     const trainWidth = 2.6;
     const trainHeight = 4;
-    const rampLength = (!isMoving && hasRamp) ? 8 : 0;
 
     const trainGroup = new THREE.Group();
 
     for (let i = 0; i < cars; i++) {
       const carOffsetZ = -i * CAR_LENGTH;
-      const isFirstCar = (i === 0);
-      const thisRampLength = (isFirstCar && !isMoving && hasRamp) ? 8 : 0;
+      const isHead = (!isMoving && hasRamp && i === 0);
+      const thisRampLength = isHead ? 8 : 0;
 
       let carMesh;
-      if (isMoving || (!isFirstCar && !hasRamp) || (!isFirstCar && isMoving)) {
-        const geo = new THREE.BoxGeometry(trainWidth, trainHeight, CAR_LENGTH);
-        geo.translate(0, trainHeight / 2, 0);
-        const mat = new THREE.MeshStandardMaterial({ color: isMoving ? 0xff5a1f : 0x1a2b4c, roughness: 0.7 });
-        carMesh = new THREE.Mesh(geo, mat);
-      } else if (!isMoving && hasRamp && isFirstCar) {
+      if (isHead) {
+        // Đầu tàu: ExtrudeGeometry unified (body + ramp)
+        // z ∈ [-10, 18]
         const halfLen = CAR_LENGTH / 2;
         const rampStartZ = halfLen + thisRampLength;
         const frontZ = -halfLen;
-        const profile = new THREE.Shape();
-        profile.moveTo(rampStartZ, 0);
-        profile.lineTo(halfLen, trainHeight);
-        profile.lineTo(frontZ, trainHeight);
-        profile.lineTo(frontZ, 0);
-        profile.lineTo(rampStartZ, 0);
+        const profile = new THREE.Shape()
+          .moveTo(rampStartZ, 0)
+          .lineTo(halfLen, trainHeight)
+          .lineTo(frontZ, trainHeight)
+          .lineTo(frontZ, 0)
+          .lineTo(rampStartZ, 0);
         const geo = new THREE.ExtrudeGeometry(profile, {
           depth: trainWidth, bevelEnabled: false, steps: 1
         });
@@ -432,28 +428,31 @@ export class TrackManager {
         const mat = new THREE.MeshStandardMaterial({ color: 0x1a2b4c, roughness: 0.7 });
         carMesh = new THREE.Mesh(geo, mat);
       } else {
+        // Thân tàu / moving train: BoxGeometry (no ramp)
+        // z ∈ [-10, 10]
         const geo = new THREE.BoxGeometry(trainWidth, trainHeight, CAR_LENGTH);
         geo.translate(0, trainHeight / 2, 0);
-        const mat = new THREE.MeshStandardMaterial({ color: 0x1a2b4c, roughness: 0.7 });
+        const mat = new THREE.MeshStandardMaterial({
+          color: isMoving ? 0xff5a1f : 0x1a2b4c, roughness: 0.7
+        });
         carMesh = new THREE.Mesh(geo, mat);
       }
 
-      const isWalkable = true;
       carMesh.position.set(0, 0, carOffsetZ);
       carMesh.castShadow = true;
       carMesh.receiveShadow = true;
       carMesh.userData = {
         type: 'obstacle',
         lane: train.lane,
-        isGround: isWalkable,
+        isGround: true,
         movingTrain: isMoving || undefined,
-        walkableProfile: isWalkable ? {
+        walkableProfile: {
           kind: 'train',
           trainWidth,
           trainHeight,
           trainLength: CAR_LENGTH,
           rampLength: thisRampLength,
-        } : undefined,
+        },
       };
       trainGroup.add(carMesh);
     }
@@ -638,7 +637,38 @@ export class TrackManager {
 
         const content = this.spawnManager.generateChunkContent(chunk, newZ);
         this.applyContentToChunk(chunk, content, newZ);
+
+        // Retroactive scene cleanup: remove obstacle meshes from existing chunks that overlap with new trains
+        const clearList = this.spawnManager.getRetroactiveClearList();
+        for (const entry of clearList) {
+          const targetChunk = this.chunks.find(c => c.uuid === entry.chunkUuid);
+          if (targetChunk) {
+            this._removeObstaclesInRange(targetChunk, entry);
+          }
+        }
       }
+    }
+  }
+
+  _removeObstaclesInRange(chunk, entry) {
+    const toRemove = [];
+    for (const child of chunk.children) {
+      if (child.userData?.type !== 'obstacle') continue;
+      if (child.userData?.walkableProfile) continue; // Skip train meshes
+      const objWorldZ = chunk.position.z + child.position.z;
+      const objLane = child.userData.lane;
+      if (objLane === undefined) continue;
+      let shouldRemove = false;
+      if (objLane === entry.trainLane && objWorldZ >= entry.clearStartZ && objWorldZ <= entry.clearEndZ) {
+        shouldRemove = true;
+      } else if (entry.adjLanes.includes(objLane) && objWorldZ >= entry.bodyStartZ && objWorldZ <= entry.bodyEndZ) {
+        shouldRemove = true;
+      }
+      if (shouldRemove) toRemove.push(child);
+    }
+    for (const obj of toRemove) {
+      this._disposeChild(obj);
+      chunk.remove(obj);
     }
   }
 
