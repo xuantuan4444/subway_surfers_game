@@ -2,6 +2,15 @@ import * as THREE from 'three';
 import { SPEED_CONFIG } from '../constants.js';
 import { ModelManager } from '../utils/ModelManager.js';
 
+const ANIMS = {
+    RUN: 'player_run',
+    JUMP: 'player_jump',
+    FALL: 'player_fall',
+    LAND: 'player_land',
+    SLIDE: 'player_slide',
+    DIE: 'player_die',
+};
+
 export class Player {
     constructor(scene, audio = null) {
         this.scene = scene;
@@ -21,6 +30,8 @@ export class Player {
         this.slideScale = 1;
 
         this.mesh = new THREE.Group();
+        this._visual = new THREE.Group();
+        this.scene.add(this._visual);
 
         const model = ModelManager.get('Player');
         if (model) {
@@ -33,29 +44,22 @@ export class Player {
                 }
             });
 
-            this.mesh.add(model);
+            this._visual.add(model);
             this._model = model;
 
             this.mesh.updateMatrixWorld(true, true);
+            model.updateMatrixWorld(true, true);
             const box = new THREE.Box3().setFromObject(model);
             const size = box.getSize(new THREE.Vector3());
             const minY = box.min.y;
             console.log(`[Player] Actual AABB: ${size.x.toFixed(3)} x ${size.y.toFixed(3)} x ${size.z.toFixed(3)}  minY=${minY.toFixed(3)}`);
 
             const targetHeight = 2;
-            const scale = targetHeight / Math.max(size.y, 0.01);
+            const scale = (targetHeight / Math.max(size.y, 0.01)) * 1.75;
             model.scale.set(scale, scale, scale);
             model.position.y = -minY * scale;
 
-            const animations = ModelManager.getAnimations('Player');
-            if (animations.length > 0) {
-                this.mixer = new THREE.AnimationMixer(model);
-                this._animAction = this.mixer.clipAction(animations[0]);
-                this._animAction.play();
-            } else {
-                this.mixer = null;
-                this._animAction = null;
-            }
+            this._initAnimations();
         } else {
             const geometry = new THREE.BoxGeometry(1, 2, 1);
             const material = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
@@ -63,12 +67,16 @@ export class Player {
             fallback.position.y = 1;
             fallback.castShadow = true;
             fallback.receiveShadow = true;
-            this.mesh.add(fallback);
+            this._visual.add(fallback);
             this._model = fallback;
             this.mixer = null;
+            this._animations = {};
+            this._currentAnimAction = null;
+            this._animState = null;
         }
 
-        this.mesh.position.set(0, 0, -5); 
+        this.mesh.position.set(0, 0, -5);
+        this._visual.position.set(0, 0, -5);
         this.scene.add(this.mesh);
 
         const proxyGeo = new THREE.BoxGeometry(1, 2, 1);
@@ -95,6 +103,105 @@ export class Player {
         this.isGrounded = true;
         this.hasSneakers = false;
         this._wasInAir = false;
+
+        this._playingLandAnim = false;
+        this._isDying = false;
+    }
+
+    _initAnimations() {
+        const animations = ModelManager.getAnimations('Player');
+        if (animations.length === 0) {
+            this.mixer = null;
+            this._animations = {};
+            this._currentAnimAction = null;
+            this._animState = null;
+            return;
+        }
+
+        this.mixer = new THREE.AnimationMixer(this._model);
+        this._animations = {};
+
+        for (const clip of animations) {
+            if (Object.values(ANIMS).includes(clip.name)) {
+                this._animations[clip.name] = this.mixer.clipAction(clip);
+            }
+        }
+
+        const landAction = this._animations[ANIMS.LAND];
+        if (landAction) {
+            landAction.loop = THREE.LoopOnce;
+            landAction.clampWhenFinished = true;
+        }
+
+        const dieAction = this._animations[ANIMS.DIE];
+        if (dieAction) {
+            dieAction.loop = THREE.LoopOnce;
+            dieAction.clampWhenFinished = true;
+        }
+
+        this.mixer.addEventListener('finished', (e) => {
+            if (e.action === this._animations[ANIMS.LAND] && this._animState === ANIMS.LAND) {
+                this._playingLandAnim = false;
+                this._animState = null;
+                this._playAnim(ANIMS.RUN, 0.15);
+            }
+        });
+
+        this._currentAnimAction = null;
+        this._animState = null;
+
+        const runAction = this._animations[ANIMS.RUN];
+        if (runAction) {
+            this._currentAnimAction = runAction;
+            runAction.play();
+            this._animState = ANIMS.RUN;
+        }
+    }
+
+    _playAnim(name, fadeDuration = 0.15) {
+        const newAction = this._animations[name];
+        if (!newAction) return;
+        if (newAction === this._currentAnimAction && newAction.isRunning()) return;
+
+        this._playingLandAnim = false;
+        this._isDying = false;
+
+        if (this._currentAnimAction) {
+            this._currentAnimAction.fadeOut(fadeDuration);
+        }
+        newAction.reset().fadeIn(fadeDuration).play();
+        this._currentAnimAction = newAction;
+        this._animState = name;
+    }
+
+    _updateAnimState(isOnGround) {
+        if (this._isDying) {
+            if (this._animState !== ANIMS.DIE) {
+                this._playAnim(ANIMS.DIE, 0.2);
+            }
+            return;
+        }
+
+        if (this._playingLandAnim && this._animState === ANIMS.LAND) {
+            return;
+        }
+
+        let desiredAnim = ANIMS.RUN;
+
+        if (this.isSliding) {
+            desiredAnim = ANIMS.SLIDE;
+        } else if (this.isJumping) {
+            desiredAnim = this.verticalVelocity > 0 ? ANIMS.JUMP : ANIMS.FALL;
+        } else if (!isOnGround && !this.isJumping) {
+            desiredAnim = ANIMS.FALL;
+        } else if (this._wasInAir && isOnGround) {
+            this._playingLandAnim = true;
+            desiredAnim = ANIMS.LAND;
+        }
+
+        if (desiredAnim !== this._animState) {
+            this._playAnim(desiredAnim);
+        }
     }
 
     _setOpacity(opacity) {
@@ -109,11 +216,18 @@ export class Player {
     }
 
     freezeAnimation() {
-        if (this._animAction) this._animAction.stop();
+        if (this._currentAnimAction) this._currentAnimAction.stop();
     }
 
     resumeAnimation() {
-        if (this._animAction) this._animAction.play();
+        this._playingLandAnim = false;
+        this._isDying = false;
+        this._playAnim(ANIMS.RUN, 0.15);
+    }
+
+    die() {
+        this._isDying = true;
+        this._playAnim(ANIMS.DIE, 0.2);
     }
 
     moveLeft() {    
@@ -138,10 +252,10 @@ export class Player {
 
     jump() {
         if (this.isSliding) {
-            this.isSliding = false; 
+            this.isSliding = false;
             this.slideTimer = 0;
             this.slideScale = 1;
-            this.mesh.position.y = this.currentGroundY; 
+            this.mesh.position.y = this.currentGroundY;
             this.verticalVelocity = 0;
         }
         const atGroundLevel = Math.abs(this.mesh.position.y - this.currentGroundY) < 0.3;
@@ -167,6 +281,11 @@ export class Player {
 
     setForwardSpeed(speed) {
         this.forwardSpeed = speed;
+        const t = (speed - SPEED_CONFIG.BASE_SPEED) / (SPEED_CONFIG.MAX_SPEED - SPEED_CONFIG.BASE_SPEED);
+        const scale = 0.85 + t * 0.3;
+        for (const key in this._animations) {
+            this._animations[key].timeScale = scale;
+        }
     }
 
     onSideHit(hitLane) {
@@ -204,6 +323,7 @@ export class Player {
                 this._setOpacity(1);
             }
             this.mesh.position.z -= this.forwardSpeed * delta;
+            this._visual.position.copy(this.mesh.position);
             return;
         }
 
@@ -274,6 +394,8 @@ export class Player {
             const onTrain = closestObject?.userData?.walkableProfile?.kind === 'train';
             if (this.audio) this.audio.play(onTrain ? 'trainLanding' : 'landing', { volume: onTrain ? 0.4 : 0.25 });
         }
+
+        this._updateAnimState(isOnGround);
         this._wasInAir = !isOnGround;
 
         if (this.isSliding) {
@@ -300,6 +422,8 @@ export class Player {
         } else {
             this.footstepTimer = 0;
         }
+
+        this._visual.position.copy(this.mesh.position);
     }
 
     getBoundingBox() {
@@ -310,14 +434,15 @@ export class Player {
     }
     
     reset() {
-        this.currentLane = 1; 
-        this.previousLane = 1; 
+        this.currentLane = 1;
+        this.previousLane = 1;
         this.targetX = 0;
         this.mesh.position.set(0, 0, -5);
+        this._visual.position.set(0, 0, -5);
         this.verticalVelocity = 0;
-        this.isJumping = false; 
-        this.isSliding = false; 
-        this.returningToLane = false; 
+        this.isJumping = false;
+        this.isSliding = false;
+        this.returningToLane = false;
         this.mesh.scale.y = 1;
         this.slideScale = 1;
         this.currentGroundY = 0;
@@ -334,6 +459,8 @@ export class Player {
         this.forwardSpeed = SPEED_CONFIG.BASE_SPEED;
         this.jumpForce = 15;
         this.gravity = -45;
+        this._playingLandAnim = false;
+        this._isDying = false;
         this.resumeAnimation();
     }
 }

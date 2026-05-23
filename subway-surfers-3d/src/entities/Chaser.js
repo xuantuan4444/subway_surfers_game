@@ -27,14 +27,15 @@ export class Chaser {
             console.log(`[Chaser] Model AABB: ${size.x.toFixed(3)} x ${size.y.toFixed(3)} x ${size.z.toFixed(3)}  minY=${minY.toFixed(3)}`);
 
             const targetHeight = 2;
-            const scale = targetHeight / Math.max(size.y, 0.01);
+            const scale = (targetHeight / Math.max(size.y, 0.01)) * 1.75;
             model.scale.set(scale, scale, scale);
             model.position.y = -minY * scale;
 
             const animations = ModelManager.getAnimations('Player');
             if (animations.length > 0) {
                 this.mixer = new THREE.AnimationMixer(model);
-                this._animAction = this.mixer.clipAction(animations[0]);
+                const runClip = animations.find(c => c.name === 'player_run') || animations[0];
+                this._animAction = this.mixer.clipAction(runClip);
                 this._animAction.play();
             } else {
                 this.mixer = null;

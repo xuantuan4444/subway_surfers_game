@@ -52,7 +52,7 @@ export class Game {
     window.addEventListener('resize', () => this.onResize());
     this.updateUI();
 
-    this.audio.loadManifest({
+    this._audioLoadPromise = this.audio.loadManifest({
       sfx: {
         coin: 'coin.mp3',
         click: 'Click.wav',
@@ -79,6 +79,7 @@ export class Game {
         swipe7: 'Swipes 7.mp3',
         swipe8: 'Swipes 8.mp3',
         swipe9: 'Swipes 9.mp3',
+        theme: 'theme.mp3',
       },
     });
 
@@ -92,6 +93,8 @@ export class Game {
     this._sideHitCooldown = 0;
     this._outroTimer = 0;
     this._outroFrozen = false;
+    this._shakeIntensity = 0;
+    this._shakeOffset = new THREE.Vector3();
     this._setupIntro();
   }
 
@@ -118,8 +121,8 @@ export class Game {
     this._magnetTimer = 0;
     this._sneakersTimer = 0;
 
-    this._introCamPos = new THREE.Vector3(4, 3, -5);
-    this._introCamTarget = new THREE.Vector3(1, 1.5, -5);
+    this._introCamPos = new THREE.Vector3(6, 5.5, -5);
+    this._introCamTarget = new THREE.Vector3(1, 3, -5);
     this.camera.position.copy(this._introCamPos);
     this.camera.lookAt(this._introCamTarget);
 
@@ -167,6 +170,9 @@ export class Game {
       }
     }
 
+    if (this.player.mixer) this.player.mixer.update(delta);
+    if (this.chaser.mixer) this.chaser.mixer.update(delta);
+
     this.chaser.mesh.position.x = this.player.mesh.position.x;
     this.chaser.mesh.position.y = this.player.mesh.position.y;
     {
@@ -204,6 +210,12 @@ export class Game {
     );
     this._chaserTransitionOffset = 2;
 
+    this._audioLoadPromise.then(() => {
+      if (this.currentState !== 'game_over' && this.currentState !== 'outro') {
+        console.log('[Game] Audio manifest loaded, starting theme');
+        this.audio.playMusic('theme');
+      }
+    });
     this.clock.start();
   }
 
@@ -216,8 +228,9 @@ export class Game {
     this._outroStartChaserZ = this.chaser.mesh.position.z;
     this._outroTargetChaserZ = this.player.mesh.position.z + 1.5;
 
-    this.player.freezeAnimation();
-
+    this.player.die();
+    this._shakeIntensity = 0.6;
+    this.audio.stopMusic(0.5);
     this.audio.play('death', { volume: 0.6 });
   }
 
@@ -235,7 +248,7 @@ export class Game {
       const dz = this.player.mesh.position.z - this.chaser.mesh.position.z;
       this.chaser.mesh.rotation.y = Math.atan2(dx, dz);
       if (this.chaser.mixer) this.chaser.mixer.update(delta);
-      this.player.freezeAnimation();
+      if (this.player.mixer) this.player.mixer.update(delta);
     } else if (this._outroTimer < 4.0) {
       if (!this._outroFrozen) {
         this._outroFrozen = true;
@@ -244,6 +257,7 @@ export class Game {
         this.chaser.mesh.position.x = this.player.mesh.position.x;
         this.audio.play('outro', { volume: 0.6 });
       }
+      if (this.player.mixer) this.player.mixer.update(delta);
       this.lighting.update(delta, this.player.mesh.position.z);
       this.track.setLampIntensity(this.lighting.darkness);
       this.track.update(delta, this.player.forwardSpeed, this.player.mesh.position.z, this.player.currentLane);
@@ -266,6 +280,17 @@ export class Game {
       2 + playerCamEffect,
       this.player.mesh.position.z - 6
     );
+  }
+
+  _applyShake(delta) {
+    if (this._shakeIntensity > 0.01) {
+      this.camera.position.x += (Math.random() - 0.5) * this._shakeIntensity * 0.8;
+      this.camera.position.y += (Math.random() - 0.5) * this._shakeIntensity * 0.6;
+      this.camera.position.z += (Math.random() - 0.5) * this._shakeIntensity * 0.4;
+      this._shakeIntensity *= Math.max(0, 1 - 8 * delta);
+    } else {
+      this._shakeIntensity = 0;
+    }
   }
 
   start() {
@@ -318,6 +343,7 @@ export class Game {
 
     if (this.currentState === 'outro') {
       this._updateOutro(delta);
+      this._applyShake(delta);
       this.renderer.render(this.scene, this.camera);
       return;
     }
@@ -433,6 +459,7 @@ export class Game {
       this.camera.lookAt(gameCamTarget);
     }
 
+    this._applyShake(delta);
     this.renderer.render(this.scene, this.camera);
   }
 
