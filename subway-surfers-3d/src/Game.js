@@ -176,6 +176,7 @@ export class Game {
 
     this.input.setEnabled(true);
     this.player.reset();
+    this.track.reset();
 
     // Chaser chạy forward (theo player) nhưng chậm dần + fade dần
     this.chaser.deactivate();

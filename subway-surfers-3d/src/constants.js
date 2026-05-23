@@ -144,7 +144,7 @@ export const CHUNK = {
 export const SPEED_CONFIG = {
   BASE_SPEED: 18,
   MAX_SPEED: 40,
-  INCREASE_RATE: 0.25,
+  INCREASE_RATE: 0.50,
 };
 
 export const POWERUP = {

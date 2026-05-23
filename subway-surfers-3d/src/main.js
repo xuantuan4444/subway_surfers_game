@@ -1,4 +1,5 @@
 import { Game } from './Game.js';
+import { ModelManager } from './utils/ModelManager.js';
 
 // Cấu hình game
 const config = {
@@ -11,8 +12,9 @@ const config = {
 };
 
 // Khởi tạo game khi trang web tải xong
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
     try {
+        await ModelManager.init();
         const game = new Game(config);
         game.start();
     } catch (error) {

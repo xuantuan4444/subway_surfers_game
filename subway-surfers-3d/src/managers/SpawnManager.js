@@ -325,15 +325,17 @@ export class SpawnManager {
     for (const row of rows) {
       const rz = chunkZ + row.z;
       for (const obs of row.obstacles) {
-        let halfLen = 3;
+        let rearLen = 3;
+        let frontLen = 3;
         if (obs.type === OBSTACLE.STATIC_TRAIN || obs.type === OBSTACLE.MOVING_TRAIN) {
           const train = trains.find(
             t => t.lane === obs.lane && Math.abs(t.z - row.z) < 5
           );
           const cars = train ? (train.cars || 1) : 1;
-          halfLen = 10 + (cars - 1) * CAR_LENGTH;
+          rearLen = 10 + (cars - 1) * CAR_LENGTH;
+          frontLen = obs.type === OBSTACLE.MOVING_TRAIN ? 10 : 10 + RAMP_LENGTH;
         }
-        blocked[obs.lane].push({ start: rz - halfLen, end: rz + halfLen });
+        blocked[obs.lane].push({ start: rz - rearLen, end: rz + frontLen });
       }
     }
     // Merge per lane
@@ -362,10 +364,11 @@ export class SpawnManager {
     for (const train of trains) {
       const tz = chunkZ + train.z;
       const cars = train.cars || 1;
-      const halfLen = 10 + (cars - 1) * CAR_LENGTH;
+      const rearLen = 10 + (cars - 1) * CAR_LENGTH;
+      const frontLen = train.isMoving ? 10 : 10 + RAMP_LENGTH;
       if (!checkZ(tz)) return false;
-      if (!checkZ(tz - halfLen)) return false;
-      if (!checkZ(tz + halfLen)) return false;
+      if (!checkZ(tz - rearLen)) return false;
+      if (!checkZ(tz + frontLen)) return false;
     }
     return true;
   }
@@ -384,16 +387,16 @@ export class SpawnManager {
     for (const row of rows) {
       for (const obs of row.obstacles) {
         const worldZ = chunkZ + row.z;
-        let halfWidth = 5;
+        let rearExtent = 5;
+        let frontExtent = 5;
         if (obs.type === OBSTACLE.STATIC_TRAIN || obs.type === OBSTACLE.MOVING_TRAIN) {
           const train = trains.find(
             t => t.lane === obs.lane && Math.abs((chunkZ + t.z) - worldZ) < 10
           );
           const carCount = train ? (train.cars || 1) : 1;
           // Block full train extent from rear past last car to front past ramp
-          const frontExtent = 10 + RAMP_LENGTH + 8; // car front + ramp + margin
-          const rearExtent = 10 + (carCount - 1) * CAR_LENGTH; // rear of last car
-          halfWidth = Math.max(frontExtent, rearExtent);
+          const frontExtent = 10 + RAMP_LENGTH;
+          const rearExtent = 10 + (carCount - 1) * CAR_LENGTH;
           // Also block adjacent lanes near the train front (car front to past ramp)
           for (const adjLane of ALL_LANES) {
             if (adjLane === obs.lane) continue;
@@ -403,7 +406,7 @@ export class SpawnManager {
             });
           }
         }
-        blockedRanges[obs.lane].push({ start: worldZ - halfWidth, end: worldZ + halfWidth });
+        blockedRanges[obs.lane].push({ start: worldZ - rearExtent, end: worldZ + frontExtent });
       }
     }
 
@@ -411,14 +414,13 @@ export class SpawnManager {
     for (const train of trains) {
       const worldZ = chunkZ + train.z;
       const carCount = train.cars || 1;
-      const frontExtent = 10 + (train.isMoving ? 0 : RAMP_LENGTH) + 8;
+      const frontExtent = 10 + (train.isMoving ? 0 : RAMP_LENGTH);
       const rearExtent = 10 + (carCount - 1) * CAR_LENGTH;
-      const halfWidth = Math.max(frontExtent, rearExtent);
-      blockedRanges[train.lane].push({ start: worldZ - halfWidth, end: worldZ + halfWidth });
+      blockedRanges[train.lane].push({ start: worldZ - rearExtent, end: worldZ + frontExtent });
       // Block adjacent lanes cho toàn bộ chiều dài train (body + ramp)
       // Vì train rộng 2.6 units, lấn 0.2 unit sang lane kế bên
       const trainStart = worldZ - 10 - (carCount - 1) * CAR_LENGTH;
-      const trainEnd = worldZ + (train.isMoving ? 10 : 10 + RAMP_LENGTH + 8);
+      const trainEnd = worldZ + (train.isMoving ? 10 : 10 + RAMP_LENGTH);
       for (const adjLane of ALL_LANES) {
         if (adjLane === train.lane) continue;
         blockedRanges[adjLane].push({ start: trainStart, end: trainEnd });

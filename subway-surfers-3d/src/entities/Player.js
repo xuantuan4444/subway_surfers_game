@@ -1,4 +1,3 @@
-// src/entities/Player.js
 import * as THREE from 'three';
 import { SPEED_CONFIG } from '../constants.js';
 
@@ -38,12 +37,18 @@ export class Player {
         this.lastValidGroundY = 0;
         this.groundObjects = [];
 
-        // Dùng để "ân hạn" collision khi vừa rời nóc tàu trong lúc đổi lane (tránh chết oan)
         this.trainGraceTimer = 0;
         this.trainGraceTrainUuid = null;
 
         this.footstepTimer = 0;
         this.footstepInterval = 0.35;
+    }
+
+    _setOpacity(opacity) {
+        if (this.material) {
+            this.material.transparent = opacity < 1;
+            this.material.opacity = opacity;
+        }
     }
 
     moveLeft() {    
@@ -102,17 +107,14 @@ export class Player {
         this.returningToLane = true;
         this.returnTimer = 0.4;
         this.hitCooldown = 0.6;
-        this.material.transparent = true;
-        this.material.opacity = 0.5;
+        this._setOpacity(0.5);
     }
 
     updateGroundObjects(trackChunks) {
         this.groundObjects = [];
         for (const chunk of trackChunks) {
-            // 🔥 Cập nhật world matrix để raycast detect đúng vị trí, đặc biệt cho train động
             chunk.updateWorldMatrix(true, true);
             chunk.traverse((child) => {
-                // Bao gồm: mặt đường (isGround), nóc/dốc tàu (isGround), và block đỏ (isWalkable)
                 if (child.userData && (child.userData.isGround === true || child.userData.isWalkable === true)) {
                     this.groundObjects.push(child);
                 }
@@ -132,8 +134,7 @@ export class Player {
                 this.returningToLane = false;
                 this.currentLane = this.previousLane;
                 this.targetX = oldLaneX;
-                this.material.opacity = 1;
-                this.material.transparent = false;
+                this._setOpacity(1);
             }
             this.mesh.position.z -= this.forwardSpeed * delta;
             return;
@@ -142,10 +143,8 @@ export class Player {
         this.mesh.position.x += (this.targetX - this.mesh.position.x) * 12 * delta;
         this.mesh.position.z -= this.forwardSpeed * delta;
 
-        // Cập nhật danh sách bề mặt có thể đứng (cả ground và walkable)
         this.updateGroundObjects(trackChunks);
 
-        // Raycast từ trên xuống (cao hơn đầu 3 đơn vị)
         this.raycaster.set(
             new THREE.Vector3(this.mesh.position.x, this.mesh.position.y + 3, this.mesh.position.z),
             new THREE.Vector3(0, -1, 0)
@@ -168,7 +167,6 @@ export class Player {
             this.currentGroundY = detectedY;
             this.lastValidGroundY = detectedY;
 
-            // Nếu đang đứng trên tàu, giữ grace timer trong một thời gian ngắn
             if (closestObject?.userData?.walkableProfile?.kind === 'train') {
                 this.trainGraceTimer = 0.45;
                 this.trainGraceTrainUuid = closestObject.uuid;
@@ -176,7 +174,6 @@ export class Player {
         }
         const targetY = this.currentGroundY + 1;
 
-        // Nhảy / rơi
         if (this.isJumping) {
             this.mesh.position.y += this.verticalVelocity * delta;
             this.verticalVelocity += this.gravity * delta;
@@ -195,7 +192,6 @@ export class Player {
             }
         }
 
-        // Trượt
         if (this.isSliding) {
             this.slideTimer -= delta;
             this.mesh.position.y = THREE.MathUtils.lerp(
@@ -211,7 +207,6 @@ export class Player {
             }
         }
 
-        // Footstep — chỉ khi đang chạy trên mặt đất
         if (this.audio && !this.isJumping && !this.isSliding && foundGround) {
             this.footstepTimer -= delta;
             if (this.footstepTimer <= 0) {
@@ -224,7 +219,10 @@ export class Player {
     }
 
     getBoundingBox() {
-        return new THREE.Box3().setFromObject(this.mesh);
+        return new THREE.Box3().setFromCenterAndSize(
+            this.mesh.position,
+            new THREE.Vector3(1, 2, 1)
+        );
     }
     
     reset() {
@@ -240,8 +238,7 @@ export class Player {
         this.mesh.scale.y = 1; 
         this.currentGroundY = 0;
         this.lastValidGroundY = 0;
-        this.material.opacity = 1; 
-        this.material.transparent = false;
+        this._setOpacity(1);
         this.groundObjects = [];
         this.trainGraceTimer = 0;
         this.trainGraceTrainUuid = null;

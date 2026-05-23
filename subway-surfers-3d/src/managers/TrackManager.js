@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { LANE, OBSTACLE, CHUNK, POWERUP, POWERUP_CONFIG } from '../constants.js';
 import { LaneUtils } from '../utils/LaneUtils.js';
 import { SpawnManager } from './SpawnManager.js';
+import { ModelManager } from '../utils/ModelManager.js';
 
 function createGlowDiscTexture() {
   const c = document.createElement('canvas');
@@ -161,18 +162,29 @@ export class TrackManager {
       group.add(lineR);
     }
 
-    const wallGeo = new THREE.BoxGeometry(0.5, 2, this.chunkLength);
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x666666 });
-    const wallL = new THREE.Mesh(wallGeo, wallMat);
-    wallL.position.set(-6.25, 1, 0);
-    wallL.castShadow = true;
-    wallL.receiveShadow = true;
-    group.add(wallL);
-    const wallR = new THREE.Mesh(wallGeo, wallMat);
-    wallR.position.set(6.25, 1, 0);
-    wallR.castShadow = true;
-    wallR.receiveShadow = true;
-    group.add(wallR);
+    // Vỉa hè 2 bên
+    const sideMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.9 });
+    const sidewalkLeft = new THREE.Mesh(new THREE.BoxGeometry(3, 0.5, this.chunkLength), sideMat);
+    sidewalkLeft.position.set(-7.5, 0.25, 0);
+    sidewalkLeft.receiveShadow = true;
+    sidewalkLeft.userData = { isGround: true, type: 'sidewalk' };
+    group.add(sidewalkLeft);
+    const sidewalkRight = new THREE.Mesh(new THREE.BoxGeometry(3, 0.5, this.chunkLength), sideMat);
+    sidewalkRight.position.set(7.5, 0.25, 0);
+    sidewalkRight.receiveShadow = true;
+    sidewalkRight.userData = { isGround: true, type: 'sidewalk' };
+    group.add(sidewalkRight);
+
+    // Mặt cỏ 2 bên
+    const grassMat = new THREE.MeshStandardMaterial({ color: 0x4a7c3f, roughness: 0.9 });
+    const grassLeft = new THREE.Mesh(new THREE.BoxGeometry(100, 0.5, this.chunkLength), grassMat);
+    grassLeft.position.set(-59, 0.25, 0);
+    grassLeft.receiveShadow = true;
+    group.add(grassLeft);
+    const grassRight = new THREE.Mesh(new THREE.BoxGeometry(100, 0.5, this.chunkLength), grassMat);
+    grassRight.position.set(59, 0.25, 0);
+    grassRight.receiveShadow = true;
+    group.add(grassRight);
 
     this._spawnLamps(group);
 
@@ -190,34 +202,30 @@ export class TrackManager {
 
     for (let offset = -halfLen + 6; offset < halfLen - 6; offset += LAMP_INTERVAL) {
       const side = (Math.floor(offset / LAMP_INTERVAL) % 2 === 0) ? -1 : 1;
-      const wallX = side * 6.5;
-      const armDir = -side;
-      const bulbX = wallX + armDir * 1.7;
-      const bulbY = 6.8;
+      const wallX = side * 6.75;
       const lightZ = offset;
+      const bulbY = 6.8;
 
-      const poleMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.8, metalness: 0.3 });
-      const pole = new THREE.Mesh(new THREE.BoxGeometry(0.2, 7, 0.2), poleMat);
-      pole.position.set(wallX, 3.5, lightZ);
-      pole.castShadow = true;
-      pole.receiveShadow = true;
-      group.add(pole);
+      // Load Streetlight.glb làm cột đèn
+      let modelGroup = new THREE.Group();
+      const src = ModelManager.get('Streetlight');
+      if (src) {
+        modelGroup = src;
+        const scale = 7;
+        modelGroup.scale.set(scale, scale, scale);
+        modelGroup.rotation.y = side < 0 ? Math.PI : 0;
+        modelGroup.traverse((child) => {
+          if (child.isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+          }
+        });
+      }
+      modelGroup.position.set(wallX, 0, lightZ);
+      group.add(modelGroup);
 
-      const arm = new THREE.Mesh(
-        new THREE.BoxGeometry(2, 0.08, 0.08),
-        new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.7, metalness: 0.3 })
-      );
-      arm.position.set(wallX + armDir * 1, 6.8, lightZ);
-      arm.castShadow = true;
-      group.add(arm);
-
-      const bulb = new THREE.Mesh(
-        new THREE.SphereGeometry(0.35, 12, 12),
-        new THREE.MeshStandardMaterial({ color: 0xffcc66, emissive: 0xffcc66, emissiveIntensity: 0 })
-      );
-      bulb.position.set(bulbX, bulbY, lightZ);
-      group.add(bulb);
-
+      // Vị trí bóng đèn (đỉnh cột)
+      const bulbX = wallX;
       const bulbGlow = new THREE.Sprite(
         new THREE.SpriteMaterial({
           map: bulbGlowTex,
@@ -272,7 +280,7 @@ export class TrackManager {
       beamSprite.scale.set(14, 9, 1);
       group.add(beamSprite);
 
-      this.lampLights.push({ light, bulb, bulbGlow, glowDisc, beamSprite, emissiveBase: 0.6 });
+      this.lampLights.push({ light, bulbGlow, glowDisc, beamSprite, emissiveBase: 0.6 });
     }
   }
 
@@ -706,7 +714,6 @@ export class TrackManager {
     const intensity = this._lampCurrentIntensity;
     for (const entry of this.lampLights) {
       entry.light.intensity = intensity * 250;
-      entry.bulb.material.emissiveIntensity = intensity * entry.emissiveBase;
       entry.bulbGlow.material.opacity = intensity * 0.5;
       entry.glowDisc.material.opacity = intensity * 0.5;
       entry.beamSprite.material.opacity = intensity * 0.25;

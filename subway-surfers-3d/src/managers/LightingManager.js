@@ -45,14 +45,14 @@ export class LightingManager {
     this.dirLight.shadow.mapSize.width = 4096;
     this.dirLight.shadow.mapSize.height = 4096;
     this.dirLight.shadow.camera.near = 0.5;
-    this.dirLight.shadow.camera.far = 90;
-    this.dirLight.shadow.camera.left = -14;
-    this.dirLight.shadow.camera.right = 14;
-    this.dirLight.shadow.camera.top = 16;
-    this.dirLight.shadow.camera.bottom = -6;
-    this.dirLight.shadow.bias = -0.0002;
-    this.dirLight.shadow.normalBias = 0.05;
-    this.dirLight.shadow.radius = 4;
+    this.dirLight.shadow.camera.far = 150;
+    this.dirLight.shadow.camera.left = -35;
+    this.dirLight.shadow.camera.right = 35;
+    this.dirLight.shadow.camera.top = 35;
+    this.dirLight.shadow.camera.bottom = -25;
+    this.dirLight.shadow.bias = -0.0005;
+    this.dirLight.shadow.normalBias = 0.02;
+    this.dirLight.shadow.radius = 6;
     this.dirLight.target.position.set(0, 0, 0);
     this.scene.add(this.dirLight);
     this.scene.add(this.dirLight.target);
@@ -139,10 +139,10 @@ export class LightingManager {
     this.dirLight.intensity = sunIntensity;
     this.darkness = 1 - sunIntensity;
 
-    this.dirLight.shadow.camera.left = -14;
-    this.dirLight.shadow.camera.right = 14;
-    this.dirLight.shadow.camera.top = 16;
-    this.dirLight.shadow.camera.bottom = -6;
+    this.dirLight.shadow.camera.left = -35;
+    this.dirLight.shadow.camera.right = 35;
+    this.dirLight.shadow.camera.top = 35;
+    this.dirLight.shadow.camera.bottom = -25;
 
     this.ambientLight.color.copy(ambientColor);
     this.ambientLight.intensity = ambientIntensity;
