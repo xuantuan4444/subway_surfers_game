@@ -34,10 +34,11 @@ export class Chaser {
             const animations = ModelManager.getAnimations('Player');
             if (animations.length > 0) {
                 this.mixer = new THREE.AnimationMixer(model);
-                const action = this.mixer.clipAction(animations[0]);
-                action.play();
+                this._animAction = this.mixer.clipAction(animations[0]);
+                this._animAction.play();
             } else {
                 this.mixer = null;
+                this._animAction = null;
             }
         } else {
             const geometry = new THREE.BoxGeometry(1, 2, 1);
@@ -167,5 +168,13 @@ export class Chaser {
     deactivate() {
         this.active = false;
         this.state = this.STATE.IDLE;
+    }
+
+    freezeAnimation() {
+        if (this._animAction) this._animAction.stop();
+    }
+
+    resumeAnimation() {
+        if (this._animAction) this._animAction.play();
     }
 }

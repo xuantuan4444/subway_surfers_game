@@ -61,6 +61,7 @@ export class Game {
         sideHit: 'SideHit.wav',
         powerup: 'Powerup.mp3',
         trainLanding: 'TrainLanding.wav',
+        outro: 'outro.mp3',
         alo1: 'alo 1.mp3',
         alo2: 'alo 2.mp3',
         alo3: 'alo 3.mp3',
@@ -89,6 +90,8 @@ export class Game {
     this._sneakersTimer = 0;
     this._aloIndex = 0;
     this._sideHitCooldown = 0;
+    this._outroTimer = 0;
+    this._outroFrozen = false;
     this._setupIntro();
   }
 
@@ -116,7 +119,7 @@ export class Game {
     this._sneakersTimer = 0;
 
     this._introCamPos = new THREE.Vector3(4, 3, -5);
-    this._introCamTarget = new THREE.Vector3(0, 1, -5);
+    this._introCamTarget = new THREE.Vector3(1, 1.5, -5);
     this.camera.position.copy(this._introCamPos);
     this.camera.lookAt(this._introCamTarget);
 
@@ -126,6 +129,7 @@ export class Game {
     this.player.reset();
 
     this.chaser.deactivate();
+    this.chaser.resumeAnimation();
     this.chaser.mesh.visible = true;
     this.chaser.mesh.position.set(0, 0, -3);
     this.chaser.active = true;
@@ -203,6 +207,67 @@ export class Game {
     this.clock.start();
   }
 
+  _startOutro() {
+    this.currentState = 'outro';
+    this._outroTimer = 0;
+    this._outroFrozen = false;
+    this.input.setEnabled(false);
+
+    this._outroStartChaserZ = this.chaser.mesh.position.z;
+    this._outroTargetChaserZ = this.player.mesh.position.z + 1.5;
+
+    this.player.freezeAnimation();
+
+    this.audio.play('death', { volume: 0.6 });
+  }
+
+  _updateOutro(delta) {
+    this._outroTimer += delta;
+
+    if (this._outroTimer < 1.0) {
+      const t = this._outroTimer / 1.0;
+      const ease = t * t * (3 - 2 * t);
+      const z = THREE.MathUtils.lerp(this._outroStartChaserZ, this._outroTargetChaserZ, ease);
+      this.chaser.mesh.position.z = z;
+      this.chaser.mesh.position.x = this.player.mesh.position.x;
+      this.chaser.mesh.position.y = this.player.mesh.position.y;
+      const dx = this.player.mesh.position.x - this.chaser.mesh.position.x;
+      const dz = this.player.mesh.position.z - this.chaser.mesh.position.z;
+      this.chaser.mesh.rotation.y = Math.atan2(dx, dz);
+      if (this.chaser.mixer) this.chaser.mixer.update(delta);
+      this.player.freezeAnimation();
+    } else if (this._outroTimer < 4.0) {
+      if (!this._outroFrozen) {
+        this._outroFrozen = true;
+        this.chaser.freezeAnimation();
+        this.chaser.mesh.position.z = this.player.mesh.position.z + 1.5;
+        this.chaser.mesh.position.x = this.player.mesh.position.x;
+        this.audio.play('outro', { volume: 0.6 });
+      }
+      this.lighting.update(delta, this.player.mesh.position.z);
+      this.track.setLampIntensity(this.lighting.darkness);
+      this.track.update(delta, this.player.forwardSpeed, this.player.mesh.position.z, this.player.currentLane);
+    } else {
+      this.triggerGameOver(true);
+      return;
+    }
+
+    const effectivePlayerY = Math.max(this.player.mesh.position.y + 1, this.player.currentGroundY + 1);
+    const camOffset = effectivePlayerY - 1;
+    const playerCamEffect = (camOffset > 0.05 ? camOffset : 0) * 0.4;
+
+    this.camera.position.set(
+      this.player.mesh.position.x * 0.3,
+      7 + playerCamEffect,
+      this.player.mesh.position.z + 9
+    );
+    this.camera.lookAt(
+      this.player.mesh.position.x,
+      2 + playerCamEffect,
+      this.player.mesh.position.z - 6
+    );
+  }
+
   start() {
     this.animate();
   }
@@ -232,9 +297,9 @@ export class Game {
     }
   }
 
-  triggerGameOver() {
+  triggerGameOver(skipSound) {
     this.currentState = 'game_over';
-    this.audio.play('death', { volume: 0.6 });
+    if (!skipSound) this.audio.play('death', { volume: 0.6 });
     if (this.uiGameOver) this.uiGameOver.style.display = 'flex';
     if (this.uiFinalScore) this.uiFinalScore.textContent = this.score;
   }
@@ -247,6 +312,12 @@ export class Game {
 
     if (this.currentState === 'intro') {
       this._updateIntro(delta);
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
+
+    if (this.currentState === 'outro') {
+      this._updateOutro(delta);
       this.renderer.render(this.scene, this.camera);
       return;
     }
@@ -412,7 +483,7 @@ export class Game {
     const { hitType, hitLane } = collisionResult;
 
     if (hitType === 'front') {
-      this.triggerGameOver();
+      this._startOutro();
       return;
     }
 

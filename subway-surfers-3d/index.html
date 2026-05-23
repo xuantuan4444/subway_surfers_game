@@ -5,38 +5,38 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" type="image/png" href="image/logo.png">
     <title>Alo Vu a Vu !</title>
-    <style>
-        body { margin: 0; overflow: hidden; }
-        canvas { display: block; }
-        @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@700;900&display=swap');
-    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div id="ui-layer">
-        <div id="score">Score: 0</div>
-
-        <div id="lives" style="position: absolute; top: 20px; right: 20px; font-size: 28px; color: white; text-shadow: 2px 2px 4px #000;">❤️❤️</div>
-
-        <div id="powerup-hud" style="position: absolute; top: 65px; right: 20px; font-size: 18px; color: #ffdd00; text-shadow: 0 0 10px rgba(255,200,0,0.5), 2px 2px 4px #000; font-family: 'Montserrat', Arial, sans-serif; display: none;"></div>
-
-        <div id="intro-overlay" style="display: flex; flex-direction: column; align-items: center; justify-content: center; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(135deg, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.3) 100%); color: white; z-index: 100; font-family: 'Montserrat', Arial, sans-serif; user-select: none;">
-            <h1 style="font-size: 72px; margin: 0; letter-spacing: 8px; text-shadow: 0 0 40px rgba(255,200,0,0.5), 0 4px 20px rgba(0,0,0,0.8); background: linear-gradient(180deg, #ffdd00 0%, #ff8800 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">SUBWAY SURFERS</h1>
-            <p style="font-size: 36px; margin: -10px 0 60px 0; letter-spacing: 4px; opacity: 0.8;">3D</p>
-            <div style="animation: pulse 1.5s ease-in-out infinite;">
-                <p style="font-size: 20px; letter-spacing: 2px; opacity: 0.9; margin: 0;">PRESS SPACE OR TAP TO START</p>
+        <div id="hud-top">
+            <div id="score">Score: 0</div>
+            <div id="hud-right">
+                <div id="lives">❤️❤️</div>
+                <div id="powerup-hud"></div>
             </div>
-            <style>
-                @keyframes pulse {
-                    0%, 100% { opacity: 1; transform: scale(1); }
-                    50% { opacity: 0.5; transform: scale(1.05); }
-                }
-            </style>
         </div>
 
-        <div id="game-over" style="display: none; flex-direction: column; align-items: center; justify-content: center; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); color: white; z-index: 100; font-family: 'Montserrat', Arial, sans-serif;">
-            <h1 style="font-size: 48px; margin-bottom: 10px;">💥 GAME OVER</h1>
-            <p style="font-size: 24px; margin-bottom: 30px;">Final Score: <span id="final-score">0</span></p>
-            <button id="restart-btn" style="padding: 15px 40px; font-size: 20px; cursor: pointer; background: #ffcc00; border: none; border-radius: 8px; font-weight: bold; font-family: 'Montserrat', Arial, sans-serif;">CHƠI LẠI</button>
+        <div id="intro-overlay">
+            <h1>ESCAPE FROM DOMIXI</h1>
+            <div id="intro-prompt">
+                <p>PRESS SPACE OR TAP TO START</p>
+            </div>
+        </div>
+
+        <div id="game-over">
+            <div id="game-over-content">
+                <div id="game-over-icon">💥</div>
+                <h1>GAME OVER</h1>
+                <div id="final-score-wrapper">
+                    <p id="final-score-label">FINAL SCORE</p>
+                    <p id="final-score">0</p>
+                </div>
+                <button id="restart-btn">CHƠI LẠI</button>
+            </div>
         </div>
     </div>
 

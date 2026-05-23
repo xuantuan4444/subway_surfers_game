@@ -1,13 +1,18 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
 body {
     margin: 0;
-    overflow: hidden; /* Ẩn thanh cuộn */
+    overflow: hidden;
     background-color: #000;
+    font-family: 'Montserrat', Arial, sans-serif;
 }
 
 canvas {
     display: block;
-    width: 100vw;
-    height: 100vh;
 }
 
 #ui-layer {
@@ -16,38 +21,207 @@ canvas {
     left: 0;
     width: 100%;
     height: 100%;
-    pointer-events: none; /* Để click xuyên qua UI vào game */
+    pointer-events: none;
+}
+
+/* ========== HUD TOP ========== */
+#hud-top {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 16px 24px;
+    pointer-events: none;
+    z-index: 10;
 }
 
 #score {
-    position: absolute;
-    top: 20px;
-    left: 20px;
-    color: white;
-    font-family: Arial, sans-serif;
-    font-size: 24px;
-    font-weight: bold;
-    text-shadow: 2px 2px 4px #000;
+    font-size: 26px;
+    font-weight: 700;
+    color: #fff;
+    text-shadow:
+        0 2px 8px rgba(0,0,0,0.8),
+        0 0 20px rgba(0,0,0,0.4);
+    letter-spacing: 0.5px;
 }
 
+#hud-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+}
+
+#lives {
+    font-size: 30px;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+    line-height: 1;
+}
+
+#powerup-hud {
+    font-size: 15px;
+    font-weight: 700;
+    color: #ffdd00;
+    text-shadow:
+        0 0 12px rgba(255,200,0,0.6),
+        0 2px 6px rgba(0,0,0,0.8);
+    display: none;
+    white-space: nowrap;
+}
+
+/* ========== INTRO OVERLAY ========== */
+#intro-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 40px;
+    z-index: 100;
+    pointer-events: auto;
+    background: linear-gradient(180deg, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0) 100%);
+    user-select: none;
+}
+
+#intro-overlay h1 {
+    font-size: 72px;
+    font-weight: 900;
+    letter-spacing: 8px;
+    margin: 0;
+    background: linear-gradient(180deg, #ffdd00 0%, #ff8800 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    filter: drop-shadow(0 4px 20px rgba(255,200,0,0.3));
+}
+
+#intro-subtitle {
+    font-size: 36px;
+    font-weight: 700;
+    letter-spacing: 4px;
+    margin: -10px 0 40px 0;
+    color: rgba(255,255,255,0.7);
+}
+
+#intro-prompt {
+    animation: introPulse 1.5s ease-in-out infinite;
+}
+
+#intro-prompt p {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: rgba(255,255,255,0.9);
+}
+
+@keyframes introPulse {
+    0%, 100% { opacity: 0.7; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(1.05); }
+}
+
+/* ========== GAME OVER ========== */
 #game-over {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    text-align: center;
-    color: white;
-    pointer-events: auto; /* Cho phép click nút */
-    background: rgba(0, 0, 0, 0.8);
-    padding: 40px;
-    border-radius: 10px;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    pointer-events: auto;
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
 }
 
+#game-over-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 48px 64px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 20px;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    animation: gameOverIn 0.4s ease-out;
+}
+
+@keyframes gameOverIn {
+    from { opacity: 0; transform: scale(0.9) translateY(20px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+#game-over-icon {
+    font-size: 56px;
+    margin-bottom: 4px;
+}
+
+#game-over h1 {
+    font-size: 44px;
+    font-weight: 900;
+    color: #ff4444;
+    letter-spacing: 6px;
+    text-shadow: 0 0 30px rgba(255,0,0,0.3);
+}
+
+#final-score-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    margin: 8px 0 16px;
+}
+
+#final-score-label {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 4px;
+    color: rgba(255,255,255,0.4);
+}
+
+#final-score {
+    font-size: 56px;
+    font-weight: 900;
+    color: #fff;
+    text-shadow: 0 0 30px rgba(255,200,0,0.3);
+    line-height: 1;
+}
+
+/* ========== BUTTONS ========== */
 button {
-    padding: 10px 20px;
-    font-size: 18px;
+    pointer-events: auto;
     cursor: pointer;
-    background: #ffcc00;
+    font-family: 'Montserrat', Arial, sans-serif;
+}
+
+#restart-btn {
+    padding: 16px 52px;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: #1a1a2e;
+    background: linear-gradient(180deg, #ffdd00 0%, #ffaa00 100%);
     border: none;
-    border-radius: 5px;
+    border-radius: 50px;
+    box-shadow: 0 4px 24px rgba(255,200,0,0.3);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+#restart-btn:hover {
+    transform: translateY(-2px) scale(1.03);
+    box-shadow: 0 6px 32px rgba(255,200,0,0.45);
+}
+
+#restart-btn:active {
+    transform: translateY(0) scale(0.98);
 }
