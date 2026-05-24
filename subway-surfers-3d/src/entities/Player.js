@@ -3,6 +3,7 @@ import { SPEED_CONFIG } from '../constants.js';
 import { ModelManager } from '../utils/ModelManager.js';
 
 const ANIMS = {
+    STAND: 'player_stand',
     RUN: 'player_run',
     JUMP: 'player_jump',
     FALL: 'player_fall',
@@ -225,9 +226,19 @@ export class Player {
         this._playAnim(ANIMS.RUN, 0.15);
     }
 
+    playStandAnimation() {
+        this._playingLandAnim = false;
+        this._isDying = false;
+        this._playAnim(ANIMS.STAND, 0.15);
+    }
+
     die() {
         this._isDying = true;
         this._playAnim(ANIMS.DIE, 0.2);
+    }
+
+    get isChangingLane() {
+        return Math.abs(this.targetX - this.mesh.position.x) > 0.05;
     }
 
     moveLeft() {    
@@ -381,11 +392,10 @@ export class Player {
             }
         } else if (!this.isSliding) {
             const diff = targetY - this.mesh.position.y;
-            if (Math.abs(diff) < 0.1) {
+            if (diff >= 0 || Math.abs(diff) < 0.1) {
                 this.mesh.position.y = targetY;
             } else {
-                const speed = diff > 0 ? 40 : 6;
-                this.mesh.position.y += diff * Math.min(1, speed * delta);
+                this.mesh.position.y += diff * Math.min(1, 6 * delta);
             }
         }
 

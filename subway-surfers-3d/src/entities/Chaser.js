@@ -1,14 +1,29 @@
 import * as THREE from 'three';
 import { ModelManager } from '../utils/ModelManager.js';
 
+const ANIMS = {
+    STAND: 'chaser_stand',
+    RUN: 'chaser_run',
+    JUMP: 'chaser_jump',
+    LAND: 'chaser_land',
+    SLIDE: 'chaser_slide',
+    WIN: 'chaser_win',
+    FALL: 'chaser_fall',
+};
+
 export class Chaser {
     constructor(scene) {
         this.scene = scene;
         this.active = false;
 
         this.mesh = new THREE.Group();
+        this._animations = {};
+        this._currentAnimAction = null;
+        this._animState = null;
+        this._wasAirborne = false;
+        this._forceRunAnimation = false;
 
-        const model = ModelManager.get('Player');
+        const model = ModelManager.get('Chaser');
         if (model) {
             model.traverse((child) => {
                 if (child.isMesh) {
@@ -31,15 +46,37 @@ export class Chaser {
             model.scale.set(scale, scale, scale);
             model.position.y = -minY * scale;
 
-            const animations = ModelManager.getAnimations('Player');
+            const animations = ModelManager.getAnimations('Chaser');
             if (animations.length > 0) {
                 this.mixer = new THREE.AnimationMixer(model);
-                const runClip = animations.find(c => c.name === 'player_run') || animations[0];
-                this._animAction = this.mixer.clipAction(runClip);
-                this._animAction.play();
+                for (const clip of animations) {
+                    if (Object.values(ANIMS).includes(clip.name)) {
+                        this._animations[clip.name] = this.mixer.clipAction(clip);
+                    }
+                }
+
+                const landAction = this._animations[ANIMS.LAND];
+                if (landAction) {
+                    landAction.loop = THREE.LoopOnce;
+                    landAction.clampWhenFinished = true;
+                }
+
+                const winAction = this._animations[ANIMS.WIN];
+                if (winAction) {
+                    winAction.loop = THREE.LoopOnce;
+                    winAction.clampWhenFinished = true;
+                }
+
+                this.mixer.addEventListener('finished', (e) => {
+                    if (e.action === this._animations[ANIMS.LAND] && this._animState === ANIMS.LAND) {
+                        this._playAnim(this.state === this.STATE.IDLE ? ANIMS.STAND : ANIMS.RUN, 0.15);
+                    }
+                });
+
+                this._playAnim(ANIMS.STAND, 0);
             } else {
                 this.mixer = null;
-                this._animAction = null;
+                this._currentAnimAction = null;
             }
         } else {
             const geometry = new THREE.BoxGeometry(1, 2, 1);
@@ -55,6 +92,7 @@ export class Chaser {
             this.mesh.add(body);
             this._model = body;
             this.mixer = null;
+            this._currentAnimAction = null;
         }
 
         const proxyGeo = new THREE.BoxGeometry(1, 2, 1);
@@ -76,17 +114,105 @@ export class Chaser {
         this._currentOffset = this.idleDistance;
         this._lerpStart = this.idleDistance;
 
-        this.STATE = { IDLE: 'idle', APPROACHING: 'approaching', CHASING: 'chasing', RETREATING: 'retreating' };
+        this.STATE = { IDLE: 'idle', APPROACHING: 'approaching', CHASING: 'chasing', RETREATING: 'retreating', WIN: 'win' };
         this.state = this.STATE.IDLE;
 
         this._history = [];
         this._accumTime = 0;
     }
 
+    _playAnim(name, fadeDuration = 0.15) {
+        const newAction = this._animations[name];
+        if (!newAction) return;
+        if (newAction === this._currentAnimAction && newAction.isRunning()) return;
+
+        if (this._currentAnimAction) {
+            this._currentAnimAction.fadeOut(fadeDuration);
+        }
+
+        newAction.reset().fadeIn(fadeDuration).play();
+        this._currentAnimAction = newAction;
+        this._animState = name;
+    }
+
+    _updateAnimation(snapshot) {
+        if (!this.mixer || this.state === this.STATE.WIN) return;
+
+        if (this._forceRunAnimation) {
+            if (this._animState !== ANIMS.RUN) {
+                this._playAnim(ANIMS.RUN, 0.12);
+            }
+            return;
+        }
+
+        if (this.state === this.STATE.IDLE || this.state === this.STATE.RETREATING) {
+            if (this._animState !== ANIMS.STAND) {
+                this._playAnim(ANIMS.STAND, 0.15);
+            }
+            return;
+        }
+
+        if (snapshot.isSliding) {
+            if (this._animState !== ANIMS.SLIDE) {
+                this._playAnim(ANIMS.SLIDE, 0.1);
+            }
+            this._wasAirborne = false;
+            return;
+        }
+
+        if (snapshot.isJumping) {
+            const desiredAnim = snapshot.verticalVelocity > 0 ? ANIMS.JUMP : ANIMS.FALL;
+            if (this._animState !== desiredAnim) {
+                this._playAnim(desiredAnim, 0.1);
+            }
+            this._wasAirborne = true;
+            return;
+        }
+
+        if (!snapshot.isGrounded) {
+            if (this._animState !== ANIMS.FALL) {
+                this._playAnim(ANIMS.FALL, 0.1);
+            }
+            this._wasAirborne = true;
+            return;
+        }
+
+        if (this._wasAirborne) {
+            this._wasAirborne = false;
+            if (this._animState !== ANIMS.LAND) {
+                this._playAnim(ANIMS.LAND, 0.08);
+            }
+            return;
+        }
+
+        if (this._animState !== ANIMS.RUN) {
+            this._playAnim(ANIMS.RUN, 0.12);
+        }
+    }
+
     activate() {
+        if (this.state !== this.STATE.IDLE) return;
         this.state = this.STATE.APPROACHING;
         this._timer = this.sprintDuration;
         this._lerpStart = this._currentOffset;
+        this._forceRunAnimation = false;
+        this._playAnim(ANIMS.RUN, 0.12);
+    }
+
+    playRunAnimation() {
+        this._forceRunAnimation = true;
+        this._playAnim(ANIMS.RUN, 0.12);
+    }
+
+    clearRunLock() {
+        this._forceRunAnimation = false;
+    }
+
+    playWinAnimation() {
+        this.state = this.STATE.WIN;
+        this.active = true;
+        this._forceRunAnimation = false;
+        this._playAnim(ANIMS.WIN, 0.12);
     }
 
     update(delta, playerMesh, currentSpeed, player) {
@@ -96,7 +222,11 @@ export class Chaser {
         this._history.push({
             time: this._accumTime,
             y: playerMesh.position.y,
-            scaleY: player.slideScale
+            scaleY: player.slideScale,
+            isJumping: player.isJumping,
+            isSliding: player.isSliding,
+            verticalVelocity: player.verticalVelocity,
+            isGrounded: player.isGrounded,
         });
         const cutoff = this._accumTime - 2;
         while (this._history.length > 1 && this._history[1].time < cutoff) {
@@ -160,6 +290,7 @@ export class Chaser {
         }
 
         this.mesh.position.y = delayedState.y;
+        this._updateAnimation(delayedState);
 
         const dx = playerMesh.position.x - this.mesh.position.x;
         const dz = playerMesh.position.z - this.mesh.position.z;
@@ -169,13 +300,16 @@ export class Chaser {
     deactivate() {
         this.active = false;
         this.state = this.STATE.IDLE;
+        this._wasAirborne = false;
+        this._forceRunAnimation = false;
+        this._playAnim(ANIMS.STAND, 0.15);
     }
 
     freezeAnimation() {
-        if (this._animAction) this._animAction.stop();
+        if (this._currentAnimAction) this._currentAnimAction.stop();
     }
 
     resumeAnimation() {
-        if (this._animAction) this._animAction.play();
+        this._playAnim(ANIMS.STAND, 0.15);
     }
 }

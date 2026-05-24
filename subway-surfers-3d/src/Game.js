@@ -90,7 +90,6 @@ export class Game {
     this._magnetTimer = 0;
     this._sneakersTimer = 0;
     this._aloIndex = 0;
-    this._sideHitCooldown = 0;
     this._outroTimer = 0;
     this._outroFrozen = false;
     this._shakeIntensity = 0;
@@ -120,7 +119,6 @@ export class Game {
     this.scoreMultiplier = 1;
     this._magnetTimer = 0;
     this._sneakersTimer = 0;
-
     this._introCamPos = new THREE.Vector3(6, 5.5, -5);
     this._introCamTarget = new THREE.Vector3(1, 3, -5);
     this.camera.position.copy(this._introCamPos);
@@ -130,16 +128,17 @@ export class Game {
     if (this.uiGameOver) this.uiGameOver.style.display = 'none';
 
     this.player.reset();
+    this.player.playStandAnimation();
 
     this.chaser.deactivate();
     this.chaser.resumeAnimation();
     this.chaser.mesh.visible = true;
-    this.chaser.mesh.position.set(0, 0, -3);
+    this.chaser.mesh.position.set(0, 0, -3);;
     this.chaser.active = true;
     this._prevChaserActive = false;
 
     this.lighting.reset();
-    this.track.reset();
+    this.track.reset({ includeCoins: false });
 
     this.input.setEnabled(false);
 
@@ -150,25 +149,6 @@ export class Game {
 
   _updateIntro(delta) {
     this.introTimer += delta;
-
-    const jumpInterval = 2.2;
-    if (this.introTimer > 0.4) {
-      const jumpPhase = (this.introTimer - 0.4) % jumpInterval;
-      if (jumpPhase < 0.35 && !this.player.isJumping) {
-        this.player.verticalVelocity = this.player.jumpForce * 0.65;
-        this.player.isJumping = true;
-      }
-    }
-
-    if (this.player.isJumping) {
-      this.player.mesh.position.y += this.player.verticalVelocity * delta;
-      this.player.verticalVelocity += this.player.gravity * delta;
-      if (this.player.mesh.position.y <= 0) {
-        this.player.mesh.position.y = 0;
-        this.player.isJumping = false;
-        this.player.verticalVelocity = 0;
-      }
-    }
 
     if (this.player.mixer) this.player.mixer.update(delta);
     if (this.chaser.mixer) this.chaser.mixer.update(delta);
@@ -201,6 +181,7 @@ export class Game {
     this.input.setEnabled(true);
     this.player.reset();
     this.track.reset();
+    this.chaser.playRunAnimation();
 
     this._prevChaserActive = true;
     this.chaser.mesh.position.set(
@@ -228,6 +209,7 @@ export class Game {
     this._outroStartChaserZ = this.chaser.mesh.position.z;
     this._outroTargetChaserZ = this.player.mesh.position.z + 1.5;
 
+    this.chaser.playWinAnimation();
     this.player.die();
     this._shakeIntensity = 0.6;
     this.audio.stopMusic(0.5);
@@ -252,11 +234,11 @@ export class Game {
     } else if (this._outroTimer < 4.0) {
       if (!this._outroFrozen) {
         this._outroFrozen = true;
-        this.chaser.freezeAnimation();
         this.chaser.mesh.position.z = this.player.mesh.position.z + 1.5;
         this.chaser.mesh.position.x = this.player.mesh.position.x;
         this.audio.play('outro', { volume: 0.6 });
       }
+      if (this.chaser.mixer) this.chaser.mixer.update(delta);
       if (this.player.mixer) this.player.mixer.update(delta);
       this.lighting.update(delta, this.player.mesh.position.z);
       this.track.setLampIntensity(this.lighting.darkness);
@@ -404,8 +386,6 @@ export class Game {
         this._sneakersTimer = 0;
       }
     }
-    if (this._sideHitCooldown > 0) this._sideHitCooldown -= delta;
-
     if (collisionResult.hitType) {
       this.resolveCollision(collisionResult);
     }
@@ -452,7 +432,7 @@ export class Game {
 
       if (t >= 1) {
         this.currentState = 'playing';
-        this.chaser.deactivate();
+        this.chaser.active = false;
       }
     } else {
       this.camera.position.copy(gameCamPos);
@@ -515,12 +495,7 @@ export class Game {
     }
 
     if (hitType === 'side') {
-      if (this.chaser.active && this.chaser.state === this.chaser.STATE.CHASING) {
-        this.triggerGameOver();
-        return;
-      }
-      if (this._sideHitCooldown > 0) return;
-      this._sideHitCooldown = 1;
+      if (this.player.returningToLane) return;
       this.audio.play('sideHit', { volume: 0.5 });
       this.audio.play(`alo${this._aloIndex + 1}`, { volume: 0.6 });
       this._aloIndex = (this._aloIndex + 1) % 3;

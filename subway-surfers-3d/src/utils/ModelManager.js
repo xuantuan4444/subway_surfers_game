@@ -4,6 +4,7 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
 const MODEL_MAP = {
   Player: 'models/Player.glb',
+  Chaser: 'models/Chaser.glb',
   Streetlight: 'models/Streetlight.glb',
   BusStopSign: 'models/Bus stop sign.glb',
   StopSign: 'models/Stop sign.glb',

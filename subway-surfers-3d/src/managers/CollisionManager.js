@@ -1,13 +1,33 @@
-// src/managers/CollisionManager.js
 import * as THREE from 'three';
 
 export class CollisionManager {
     constructor() {
         this.playerBox = new THREE.Box3();
         this.objectBox = new THREE.Box3();
+        this._compositeBox = new THREE.Box3();
 
         this._tmpVec1 = new THREE.Vector3();
         this._tmpVec2 = new THREE.Vector3();
+        this._processedTrainGroups = new Set();
+    }
+
+    _buildTrainCompositeBox(trainGroup, targetBox) {
+        const data = trainGroup.userData;
+        const tw = data.trainWidth ?? 2.6;
+        const th = data.trainHeight ?? 4;
+        const tl = data.trainLength ?? 20;
+        const rampLen = data.rampLength ?? 0;
+        const cars = data.cars ?? 1;
+        const halfCarLen = tl / (cars * 2);
+
+        const groupPos = new THREE.Vector3();
+        trainGroup.getWorldPosition(groupPos);
+
+        const minZ = groupPos.z - tl + halfCarLen;
+        const maxZ = groupPos.z + halfCarLen + rampLen;
+
+        targetBox.min.set(groupPos.x - tw / 2, groupPos.y, minZ);
+        targetBox.max.set(groupPos.x + tw / 2, groupPos.y + th, maxZ);
     }
 
     checkCollisions(player, trackChunks) {
@@ -22,12 +42,11 @@ export class CollisionManager {
         let hitType = null;
         let hitLane = null;
 
-        outer: for (const chunk of trackChunks) {
+        this._processedTrainGroups.clear();
 
-            // Đảm bảo matrixWorld của chunk & con được cập nhật trước khi tính Box3/worldToLocal
+        outer: for (const chunk of trackChunks) {
             chunk.updateWorldMatrix(true, true);
 
-            // Duyệt sâu để bắt cả các object nằm trong Group (vd: trainGroup)
             const stack = [...chunk.children];
             while (stack.length > 0) {
                 const obj = stack.pop();
@@ -41,47 +60,67 @@ export class CollisionManager {
                 if (!data || data.collected) continue;
 
                 const type = data.type;
-                // Chỉ check collider & coin. Các mặt đất (train_ramp/train_top/obstacle_ramp...) được raycast xử lý.
                 if (type !== 'coin' && type !== 'obstacle' && type !== 'powerup') continue;
 
                 this.objectBox.setFromObject(obj);
+
+                // Coin/powerup mở rộng Y range
                 if (type === 'coin') {
-                  this.objectBox.min.y = -1;
-                  this.objectBox.max.y = 6;
-                }
-                if (!this.playerBox.intersectsBox(this.objectBox)) continue;
-
-                if (type === 'coin') {
-                    obj.visible = false;
-                    data.collected = true;
-                    coinsCollected++;
-                    continue;
+                    this.objectBox.min.y = -1;
+                    this.objectBox.max.y = 6;
                 }
 
-                if (type === 'powerup') {
-                    obj.visible = false;
-                    data.collected = true;
-                    collectedPowerUps.push(data.powerUpType);
-                    continue;
+                const isTrainPart = data.isTrainPart && obj.parent;
+
+                // --- Intersection gate ---
+                // Train part: bỏ qua per-car test (gap giữa các toa),
+                // dùng composite box thay thế.
+                // Non-train: intersection test chuẩn trên per-object AABB.
+                if (!isTrainPart) {
+                    if (!this.playerBox.intersectsBox(this.objectBox)) continue;
+
+                    // Coin / powerup
+                    if (type === 'coin') {
+                        obj.visible = false;
+                        data.collected = true;
+                        coinsCollected++;
+                        continue;
+                    }
+                    if (type === 'powerup') {
+                        obj.visible = false;
+                        data.collected = true;
+                        collectedPowerUps.push(data.powerUpType);
+                        continue;
+                    }
+                } else {
+                    // Train part: use composite box for intersection + classification,
+                    // but still evaluate walkable surface on each car individually.
+                    const trainGroup = obj.parent;
+                    const uuid = trainGroup.uuid;
+                    if (!this._processedTrainGroups.has(uuid)) {
+                        this._processedTrainGroups.add(uuid);
+                        this._buildTrainCompositeBox(trainGroup, this._compositeBox);
+                        if (!this.playerBox.intersectsBox(this._compositeBox)) continue;
+                    }
+                    // Per-car skip: player not near this specific car
+                    if (!this.playerBox.intersectsBox(this.objectBox)) continue;
                 }
 
-                // type === 'obstacle'
+                // --- type === 'obstacle' (barrier hoặc train part) ---
                 if (data.requiresSlide && player.isSliding) {
                     continue;
                 }
 
                 const playerBottomY = this.playerBox.min.y;
-
                 const objectTopY = this.objectBox.max.y;
 
                 const isSliding = player.isSliding === true;
                 const isFalling = isSliding || (player.verticalVelocity ?? 0) <= 0;
                 const isJumping = player.isJumping === true;
 
-                // --- Walkable surface check (train ramp + roof) ---
+                // --- Walkable surface check (train roof + ramp) ---
                 const profile = data.walkableProfile;
                 if (profile && profile.kind === 'train') {
-                    // Convert player position to obstacle local space (supports future scaling/models)
                     const localPos = this._tmpVec1.copy(player.mesh.position);
                     obj.worldToLocal(localPos);
 
@@ -91,7 +130,6 @@ export class CollisionManager {
 
                     const isOnTrain = (player.trainGraceTimer ?? 0) > 0;
 
-                    // Khi đang đổi lane trên train, bỏ qua mọi va chạm train để cho phép chuyển sang train kế bên.
                     if (isChangingLane && isOnTrain) {
                         continue;
                     }
@@ -100,7 +138,6 @@ export class CollisionManager {
                         isOnTrain &&
                         player.trainGraceTrainUuid === obj.uuid;
 
-                    // Only treat as "standing on" when player is reasonably inside the train width
                     const halfWidth = (profile.trainWidth ?? 0) / 2;
                     const lateralMargin = 0.25;
                     const withinWidth = Math.abs(localPos.x) <= (halfWidth - lateralMargin);
@@ -109,9 +146,6 @@ export class CollisionManager {
                     const rampLen = profile.rampLength ?? 0;
                     const height = profile.trainHeight ?? 0;
 
-                    // 1) Đổi lane trên nóc tàu: bỏ qua va chạm để player rớt xuống tự nhiên
-                    // 2) Đổi lane trên ramp/nóc tàu: bỏ qua va chạm để không bị chaser kích hoạt oan
-                    // 3) Đi hết tàu (qua mép trước -Z): vẫn còn AABB overlap trong 1-2 frame => bỏ qua để không chết oan
                     if (isGraceTrain) {
                         if (isChangingLane && localPos.z >= -halfLen && localPos.z <= halfLen + rampLen) {
                             continue;
@@ -123,7 +157,6 @@ export class CollisionManager {
 
                     if (withinWidth) {
                         let surfaceYLocal = null;
-                        // Clamp z vào phạm vi có geometry để tránh case AABB chạm ramp trước khi tâm player vào ramp
                         const minZ = -halfLen;
                         const maxZ = halfLen + rampLen;
                         const z = Math.min(Math.max(localPos.z, minZ), maxZ);
@@ -131,7 +164,6 @@ export class CollisionManager {
                         if (z >= -halfLen && z <= halfLen) {
                             surfaceYLocal = height;
                         } else if (z > halfLen && z <= halfLen + rampLen && rampLen > 0) {
-                            // Ramp is on the +Z side: y goes 0 -> height when z goes (halfLen + rampLen) -> halfLen
                             surfaceYLocal = ((halfLen + rampLen - z) / rampLen) * height;
                         }
 
@@ -154,31 +186,40 @@ export class CollisionManager {
                     }
                 }
 
-                // Nếu player đang ở trên nóc -> an toàn
+                // Player đang ở trên nóc → an toàn
                 if (playerBottomY >= objectTopY - TOP_CONTACT_EPSILON) {
                     continue;
                 }
 
-                // Cho phép tiếp đất lên nóc khi đang rơi xuống (tránh bị tính là đâm khi nhảy lên barrier)
                 if ((isFalling || isJumping) && playerBottomY >= objectTopY - TOP_LANDING_EPSILON) {
                     continue;
                 }
 
-                // Va chạm thật (đâm vào thân)
-                const xOverlap = Math.min(this.playerBox.max.x, this.objectBox.max.x) -
-                                 Math.max(this.playerBox.min.x, this.objectBox.min.x);
-                const zOverlap = Math.min(this.playerBox.max.z, this.objectBox.max.z) -
-                                 Math.max(this.playerBox.min.z, this.objectBox.min.z);
+                // --- Chọn hitbox cho overlap computation ---
+                const hitBox = isTrainPart ? this._compositeBox : this.objectBox;
+
+                // --- Overlap ---
+                const xOverlap = Math.min(this.playerBox.max.x, hitBox.max.x) -
+                                 Math.max(this.playerBox.min.x, hitBox.min.x);
+                const zOverlap = Math.min(this.playerBox.max.z, hitBox.max.z) -
+                                 Math.max(this.playerBox.min.z, hitBox.min.z);
                 const playerWidth = this.playerBox.max.x - this.playerBox.min.x;
                 const playerLength = this.playerBox.max.z - this.playerBox.min.z;
-                
-                let isFrontal = false;
-                if (xOverlap > playerWidth * 0.5) {
-                    isFrontal = true; // Hơn một nửa bề ngang => đâm trực diện
-                } else if (zOverlap < playerLength * 0.5 && zOverlap < xOverlap) {
-                    isFrontal = true; // Vừa chạm mặt trước góc
+                if (xOverlap <= 0 || zOverlap <= 0) continue;
+
+                // --- Classification ---
+                let isFrontal;
+                if (isTrainPart) {
+                    // Composite box: zOverlap phản ánh đúng độ xuyên Z (≈ playerLength).
+                    // FRONT chỉ khi Z xuyên < X xuyên (player ở rìa trước tàu).
+                    // SIDE khi Z xuyên >= X xuyên (player chạy dọc hông tàu).
+                    isFrontal = zOverlap < xOverlap;
+                } else {
+                    // Barrier / obstacle thường: dùng logic gốc
+                    isFrontal = xOverlap > playerWidth * 0.5 ||
+                               (zOverlap < playerLength * 0.5 && zOverlap < xOverlap);
                 }
-                
+
                 hitType = isFrontal ? 'front' : 'side';
                 hitLane = data.lane ?? null;
                 break outer;

@@ -123,6 +123,19 @@ export class TrackManager {
     this._lampCurrentIntensity = 0;
     this._coinGlowTex = createCoinGlowTexture();
     this._coinSparkleTimer = 0;
+
+    const loader = new THREE.TextureLoader();
+    const texDir = 'textures/brick_pavement_03_1k.gltf/textures/';
+    this._brickDiff = loader.load(texDir + 'brick_pavement_03_diff_1k.jpg');
+    this._brickDiff.wrapS = this._brickDiff.wrapT = THREE.RepeatWrapping;
+    this._brickDiff.repeat.set(0.5, 2);
+    this._brickArm = loader.load(texDir + 'brick_pavement_03_arm_1k.jpg');
+    this._brickArm.wrapS = this._brickArm.wrapT = THREE.RepeatWrapping;
+    this._brickArm.repeat.set(0.5, 2);
+    this._brickNorGl = loader.load(texDir + 'brick_pavement_03_nor_gl_1k.jpg');
+    this._brickNorGl.wrapS = this._brickNorGl.wrapT = THREE.RepeatWrapping;
+    this._brickNorGl.repeat.set(0.5, 2);
+
     this.initChunks();
   }
 
@@ -162,21 +175,34 @@ export class TrackManager {
       group.add(lineR);
     }
 
-    // Vỉa hè 2 bên
-    const sideMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.9 });
-    const sidewalkLeft = new THREE.Mesh(new THREE.BoxGeometry(3, 0.5, this.chunkLength), sideMat);
+    // Vỉa hè 2 bên (texture gạch)
+    const sideGeo = new THREE.BoxGeometry(3, 0.5, this.chunkLength);
+    const uvAttr = sideGeo.getAttribute('uv');
+    if (uvAttr) {
+      sideGeo.setAttribute('uv2', uvAttr.clone());
+    }
+    const sideMat = new THREE.MeshStandardMaterial({
+      map: this._brickDiff,
+      aoMap: this._brickArm,
+      roughnessMap: this._brickArm,
+      metalnessMap: this._brickArm,
+      normalMap: this._brickNorGl,
+      roughness: 0.85,
+      metalness: 0.05,
+    });
+    const sidewalkLeft = new THREE.Mesh(sideGeo, sideMat);
     sidewalkLeft.position.set(-7.5, 0.25, 0);
     sidewalkLeft.receiveShadow = true;
     sidewalkLeft.userData = { isGround: true, type: 'sidewalk' };
     group.add(sidewalkLeft);
-    const sidewalkRight = new THREE.Mesh(new THREE.BoxGeometry(3, 0.5, this.chunkLength), sideMat);
+    const sidewalkRight = new THREE.Mesh(sideGeo, sideMat);
     sidewalkRight.position.set(7.5, 0.25, 0);
     sidewalkRight.receiveShadow = true;
     sidewalkRight.userData = { isGround: true, type: 'sidewalk' };
     group.add(sidewalkRight);
 
-    // Mặt cỏ 2 bên
-    const grassMat = new THREE.MeshStandardMaterial({ color: 0x4a7c3f, roughness: 0.9 });
+    // Mặt đất 2 bên (xám)
+    const grassMat = new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.9 });
     const grassLeft = new THREE.Mesh(new THREE.BoxGeometry(100, 0.5, this.chunkLength), grassMat);
     grassLeft.position.set(-59, 0.25, 0);
     grassLeft.receiveShadow = true;
@@ -446,18 +472,32 @@ export class TrackManager {
         lane: train.lane,
         isGround: true,
         movingTrain: isMoving || undefined,
+        isTrainPart: true,
         walkableProfile: {
-          kind: 'train',
-          trainWidth,
-          trainHeight,
-          trainLength: CAR_LENGTH,
-          rampLength: thisRampLength,
+            kind: 'train',
+            trainWidth,
+            trainHeight,
+            trainLength: CAR_LENGTH,
+            rampLength: thisRampLength,
         },
-      };
+    };
       trainGroup.add(carMesh);
     }
 
+    const totalTrainLength = CAR_LENGTH * cars;
+
     trainGroup.position.set(xPos, 0, zPos);
+    trainGroup.userData = {
+      type: 'train',
+      lane: train.lane,
+      cars,
+      hasRamp,
+      trainWidth,
+      trainHeight,
+      trainLength: totalTrainLength,
+      rampLength: hasRamp && !isMoving ? 8 : 0,
+      movingTrain: isMoving || undefined,
+    };
 
     if (isMoving) {
       const baseMin = 12;
@@ -467,6 +507,12 @@ export class TrackManager {
       const maxSpeed = Math.round(baseMax * ratio * 10) / 10;
       trainGroup.userData = {
         type: 'train',
+        lane: train.lane,
+        cars,
+        trainWidth,
+        trainHeight,
+        trainLength: totalTrainLength,
+        rampLength: 0,
         movingTrain: true,
         trainMotion: {
           speed: THREE.MathUtils.randFloat(minSpeed, maxSpeed),
@@ -475,7 +521,15 @@ export class TrackManager {
         }
       };
     } else {
-      trainGroup.userData = { type: 'train' };
+      trainGroup.userData = {
+        type: 'train',
+        lane: train.lane,
+        cars,
+        trainWidth,
+        trainHeight,
+        trainLength: totalTrainLength,
+        rampLength: hasRamp && !isMoving ? 8 : 0,
+      };
     }
 
     if (train.rooftopCoins) {
@@ -750,7 +804,8 @@ export class TrackManager {
     }
   }
 
-  reset() {
+  reset(options = {}) {
+    const { includeCoins = true } = options;
     this.spawnManager.reset();
     this._playerSpeed = 18;
     for (const chunk of this.chunks) {
@@ -761,5 +816,21 @@ export class TrackManager {
     this._lampTargetIntensity = 0;
     this._lampCurrentIntensity = 0;
     this.initChunks();
+
+    if (!includeCoins) {
+      this.clearAllCoins();
+    }
+  }
+
+  clearAllCoins() {
+    for (const chunk of this.chunks) {
+      for (let i = chunk.children.length - 1; i >= 0; i--) {
+        const child = chunk.children[i];
+        if (child.userData?.type === 'coin') {
+          this._disposeChild(child);
+          chunk.remove(child);
+        }
+      }
+    }
   }
 }
