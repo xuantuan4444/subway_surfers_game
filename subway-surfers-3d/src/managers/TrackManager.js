@@ -131,6 +131,19 @@ export class TrackManager {
     this._brickNorGl.wrapS = this._brickNorGl.wrapT = THREE.RepeatWrapping;
     this._brickNorGl.repeat.set(0.5, 2);
 
+    const texDir2 = 'textures/sidewalktexture/';
+    this._graniteDiff = loader.load(texDir2 + 'granite_tile_diff_1k.png');
+    this._graniteDiff.wrapS = this._graniteDiff.wrapT = THREE.RepeatWrapping;
+    this._graniteDiff.repeat.set(20, 12);
+    this._graniteArm = loader.load(texDir2 + 'granite_tile_arm_1k.png');
+    this._graniteArm.wrapS = this._graniteArm.wrapT = THREE.RepeatWrapping;
+    this._graniteArm.repeat.set(20, 12);
+    this._graniteNorGl = loader.load(texDir2 + 'granite_tile_nor_gl_1k.png');
+    this._graniteNorGl.wrapS = this._graniteNorGl.wrapT = THREE.RepeatWrapping;
+    this._graniteNorGl.repeat.set(20, 12);
+
+    this._initFogEdges();
+
     // Roadside pool — khởi tạo sau initChunks
     this._roadsidePool       = [];
     this._roadsideModelLength = 0;
@@ -138,6 +151,63 @@ export class TrackManager {
     this._measureRoadsideModelLength();
     this.initChunks();
     // Roadside models are now spawned per-chunk so they reload with chunk recycling
+  }
+
+  /* =========================================================
+     FOG EDGES
+  ========================================================= */
+
+  _initFogEdges() {
+    const fogEdgeWidth = 10;
+    this._fogEdgeGeo = new THREE.PlaneGeometry(fogEdgeWidth, this.chunkLength);
+    this._fogEdgeGeo.rotateX(-Math.PI / 2);
+
+    const lCanvas = document.createElement('canvas');
+    lCanvas.width = 64;
+    lCanvas.height = 1;
+    const lCtx = lCanvas.getContext('2d');
+    const lG = lCtx.createLinearGradient(0, 0, 64, 0);
+    lG.addColorStop(0.0, 'rgba(255,255,255,1)');
+    lG.addColorStop(0.4, 'rgba(255,255,255,0.5)');
+    lG.addColorStop(1.0, 'rgba(255,255,255,0)');
+    lCtx.fillStyle = lG;
+    lCtx.fillRect(0, 0, 64, 1);
+
+    const rCanvas = document.createElement('canvas');
+    rCanvas.width = 64;
+    rCanvas.height = 1;
+    const rCtx = rCanvas.getContext('2d');
+    const rG = rCtx.createLinearGradient(0, 0, 64, 0);
+    rG.addColorStop(0.0, 'rgba(255,255,255,0)');
+    rG.addColorStop(0.6, 'rgba(255,255,255,0.5)');
+    rG.addColorStop(1.0, 'rgba(255,255,255,1)');
+    rCtx.fillStyle = rG;
+    rCtx.fillRect(0, 0, 64, 1);
+
+    this._fogEdgeLeftMat = new THREE.MeshBasicMaterial({
+      map: new THREE.CanvasTexture(lCanvas),
+      color: this.scene.fog ? this.scene.fog.color : 0xa9e4ff,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.NormalBlending,
+    });
+    this._fogEdgeRightMat = new THREE.MeshBasicMaterial({
+      map: new THREE.CanvasTexture(rCanvas),
+      color: this.scene.fog ? this.scene.fog.color : 0xa9e4ff,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.NormalBlending,
+    });
+  }
+
+  _createFogEdges(group) {
+    const left = new THREE.Mesh(this._fogEdgeGeo, this._fogEdgeLeftMat);
+    left.position.set(-104, 0.26, 0);
+    group.add(left);
+
+    const right = new THREE.Mesh(this._fogEdgeGeo, this._fogEdgeRightMat);
+    right.position.set(104, 0.26, 0);
+    group.add(right);
   }
 
   /* =========================================================
@@ -210,16 +280,28 @@ export class TrackManager {
     group.add(sidewalkRight);
 
     // Mặt đất 2 bên
-    const grassMat = new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.9 });
-    const grassLeft = new THREE.Mesh(new THREE.BoxGeometry(100, 0.5, this.chunkLength), grassMat);
+    const grassMat = new THREE.MeshStandardMaterial({
+      map: this._graniteDiff,
+      aoMap: this._graniteArm,
+      roughnessMap: this._graniteArm,
+      metalnessMap: this._graniteArm,
+      normalMap: this._graniteNorGl,
+      roughness: 0.9,
+      metalness: 0.05,
+    });
+    const grassGeo = new THREE.BoxGeometry(100, 0.5, this.chunkLength);
+    const grassUvAttr = grassGeo.getAttribute('uv');
+    if (grassUvAttr) grassGeo.setAttribute('uv2', grassUvAttr.clone());
+    const grassLeft = new THREE.Mesh(grassGeo, grassMat);
     grassLeft.position.set(-59, 0.25, 0);
     grassLeft.receiveShadow = true;
     group.add(grassLeft);
-    const grassRight = new THREE.Mesh(new THREE.BoxGeometry(100, 0.5, this.chunkLength), grassMat);
+    const grassRight = new THREE.Mesh(grassGeo.clone(), grassMat);
     grassRight.position.set(59, 0.25, 0);
     grassRight.receiveShadow = true;
     group.add(grassRight);
 
+    this._createFogEdges(group);
     this._spawnLamps(group);
     this._spawnChunkDecor(group);
 
@@ -592,7 +674,7 @@ export class TrackManager {
       new THREE.BoxGeometry(2.5, 2.0, 0.8),
       new THREE.MeshStandardMaterial({ color: 0xffaa00, roughness: 0.4 })
     );
-    board.position.set(0, 3.5, 0);
+    board.position.set(0, 3.0, 0);
     board.castShadow = board.receiveShadow = true;
     board.userData = { type: 'obstacle', lane: obs.lane, requiresSlide: true };
     barrierGroup.add(board);
@@ -780,6 +862,11 @@ export class TrackManager {
     this.animatePowerUps(delta);
     this.animateTrains(delta);
     this._updateLamps(delta);
+
+    if (this.scene.fog) {
+      this._fogEdgeLeftMat.color.copy(this.scene.fog.color);
+      this._fogEdgeRightMat.color.copy(this.scene.fog.color);
+    }
 
     let frontZ = 0;
     for (const chunk of this.chunks) {
