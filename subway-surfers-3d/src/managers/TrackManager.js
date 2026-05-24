@@ -427,14 +427,14 @@ export class TrackManager {
     const barrierGroup = new THREE.Group();
     const uMat = new THREE.MeshStandardMaterial({ color: 0xffaa00, roughness: 0.4 });
 
-    const pillarGeo = new THREE.BoxGeometry(0.3, 1.4, 0.3);
+    const pillarGeo = new THREE.BoxGeometry(0.3, 2.4, 0.3);
     const pillarL = new THREE.Mesh(pillarGeo, uMat);
-    pillarL.position.set(-1.1, 0.7, 0);
+    pillarL.position.set(-1.1, 1.2, 0);
     pillarL.castShadow = true;
     pillarL.receiveShadow = true;
     barrierGroup.add(pillarL);
     const pillarR = pillarL.clone();
-    pillarR.position.set(1.1, 0.7, 0);
+    pillarR.position.set(1.1, 1.2, 0);
     pillarR.castShadow = true;
     pillarR.receiveShadow = true;
     barrierGroup.add(pillarR);
@@ -442,7 +442,7 @@ export class TrackManager {
     const boardGeo = new THREE.BoxGeometry(2.5, 2.0, 0.8);
     const boardMat = new THREE.MeshStandardMaterial({ color: 0xffaa00, roughness: 0.4 });
     const board = new THREE.Mesh(boardGeo, boardMat);
-    board.position.set(0, 2.5, 0);
+    board.position.set(0, 3.5, 0);
     board.castShadow = true;
     board.receiveShadow = true;
     board.userData = { type: 'obstacle', lane: obs.lane, requiresSlide: true };

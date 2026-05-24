@@ -496,6 +496,7 @@ export class Game {
 
     if (hitType === 'side') {
       if (this.player.returningToLane) return;
+      if (this.chaser.active) { this._startOutro(); return; }
       this.audio.play('sideHit', { volume: 0.5 });
       this.audio.play(`alo${this._aloIndex + 1}`, { volume: 0.6 });
       this._aloIndex = (this._aloIndex + 1) % 3;
