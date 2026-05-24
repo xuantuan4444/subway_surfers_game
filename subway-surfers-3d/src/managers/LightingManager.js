@@ -2,21 +2,21 @@ import * as THREE from 'three';
 
 const CYCLE_DURATION = 80;
 
-const DAY_COLOR = new THREE.Color(0x99ddff);
-const SUNSET_COLOR = new THREE.Color(0xff8844);
-const NIGHT_COLOR = new THREE.Color(0x1a1a3e);
+const DAY_COLOR = new THREE.Color(0xa8e6ff);
+const SUNSET_COLOR = new THREE.Color(0xff9a57);
+const NIGHT_COLOR = new THREE.Color(0x24305f);
 
-const DAY_SUN_COLOR = new THREE.Color(0xfffff0);
-const SUNSET_SUN_COLOR = new THREE.Color(0xffaa33);
-const NIGHT_SUN_COLOR = new THREE.Color(0x4444aa);
+const DAY_SUN_COLOR = new THREE.Color(0xfff7df);
+const SUNSET_SUN_COLOR = new THREE.Color(0xffb24a);
+const NIGHT_SUN_COLOR = new THREE.Color(0x6a6fd8);
 
 const DAY_AMBIENT_COLOR = new THREE.Color(0xffffff);
-const NIGHT_AMBIENT_COLOR = new THREE.Color(0x445577);
+const NIGHT_AMBIENT_COLOR = new THREE.Color(0x6a7c9a);
 
-const DAY_HEMI_SKY = new THREE.Color(0x6699ff);
-const NIGHT_HEMI_SKY = new THREE.Color(0x223355);
-const DAY_HEMI_GROUND = new THREE.Color(0x996644);
-const NIGHT_HEMI_GROUND = new THREE.Color(0x333344);
+const DAY_HEMI_SKY = new THREE.Color(0x7bc3ff);
+const NIGHT_HEMI_SKY = new THREE.Color(0x31446e);
+const DAY_HEMI_GROUND = new THREE.Color(0xb27c5a);
+const NIGHT_HEMI_GROUND = new THREE.Color(0x42435a);
 
 function createGlowTexture() {
   const canvas = document.createElement('canvas');
@@ -39,7 +39,7 @@ export class LightingManager {
     this.scene = scene;
     this.elapsed = 0;
 
-    this.dirLight = new THREE.DirectionalLight(0xffffff, 1);
+    this.dirLight = new THREE.DirectionalLight(0xffffff, 1.15);
     this.dirLight.position.set(-40, 30, 0);
     this.dirLight.castShadow = true;
     this.dirLight.shadow.mapSize.width = 4096;
@@ -57,10 +57,10 @@ export class LightingManager {
     this.scene.add(this.dirLight);
     this.scene.add(this.dirLight.target);
 
-    this.ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+    this.ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
     this.scene.add(this.ambientLight);
 
-    this.hemiLight = new THREE.HemisphereLight(0x6699ff, 0x996644, 0.5);
+    this.hemiLight = new THREE.HemisphereLight(0x7bc3ff, 0xb27c5a, 0.65);
     this.scene.add(this.hemiLight);
 
     const sunGeo = new THREE.SphereGeometry(4, 24, 24);
@@ -119,20 +119,21 @@ export class LightingManager {
     // Tạo sunset/dawn glow khi norm ~0.5 (hoàng hôn/bình minh)
     const glowFactor = Math.max(0, 1 - Math.abs(norm - 0.5) * 4); // 0→1→0, peaks at 0.5
 
-    let sunIntensity = THREE.MathUtils.smoothstep(norm, 0.2, 0.9) * 1.2;
+    let sunIntensity = THREE.MathUtils.smoothstep(norm, 0.15, 0.9) * 1.45;
     let skyColor = DAY_COLOR.clone().lerp(NIGHT_COLOR, 1 - norm);
     let sunColor = DAY_SUN_COLOR.clone().lerp(NIGHT_SUN_COLOR, 1 - norm);
     let ambientColor = DAY_AMBIENT_COLOR.clone().lerp(NIGHT_AMBIENT_COLOR, 1 - norm);
-    let ambientIntensity = THREE.MathUtils.lerp(0.35, 0.7, norm);
+    let ambientIntensity = THREE.MathUtils.lerp(0.55, 0.95, norm);
     let hemiSky = DAY_HEMI_SKY.clone().lerp(NIGHT_HEMI_SKY, 1 - norm);
     let hemiGround = DAY_HEMI_GROUND.clone().lerp(NIGHT_HEMI_GROUND, 1 - norm);
-    let hemiIntensity = THREE.MathUtils.lerp(0.25, 0.5, norm);
+    let hemiIntensity = THREE.MathUtils.lerp(0.35, 0.75, norm);
 
     // Sunset/dawn tint
     if (glowFactor > 0) {
       skyColor.lerp(SUNSET_COLOR, glowFactor * 0.6);
       sunColor.lerp(SUNSET_SUN_COLOR, glowFactor * 0.5);
-      ambientColor.lerp(new THREE.Color(0xff8844), glowFactor * 0.15);
+      ambientColor.lerp(new THREE.Color(0xff9a57), glowFactor * 0.22);
+      hemiSky.lerp(new THREE.Color(0xffb36b), glowFactor * 0.16);
     }
 
     this.dirLight.color.copy(sunColor);
@@ -164,7 +165,7 @@ export class LightingManager {
     this.sunSphere.material.opacity = Math.min(1, sunIntensity * 2);
     this.sunSphere.visible = sunIntensity > 0.03;
 
-    this.sunGlow.material.opacity = 0.4 + 0.6 * sunIntensity;
+    this.sunGlow.material.opacity = 0.5 + 0.7 * sunIntensity;
     this.sunGlow.material.color.copy(sunColor);
     this.sunGlow.visible = sunIntensity > 0.03;
 

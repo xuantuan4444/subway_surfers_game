@@ -213,6 +213,7 @@ export class TrackManager {
     group.add(grassRight);
 
     this._spawnLamps(group);
+    this._spawnChunkDecor(group);
 
     group.userData.baseChildCount = group.children.length;
     return group;
@@ -307,6 +308,44 @@ export class TrackManager {
       group.add(beamSprite);
 
       this.lampLights.push({ light, bulbGlow, glowDisc, beamSprite, emissiveBase: 0.6 });
+    }
+  }
+
+  _spawnChunkDecor(group) {
+    const halfLen = this.chunkLength / 2;
+    const leftX = -7.5;
+    const rightX = 7.5;
+    const leftItems = [
+      { name: 'Tree_1', z: -halfLen + 30, y: 0.5, scale: 8, rotationY: -Math.PI / 2 },
+      { name: 'Chest', z: -10, scale: 5, rotationY: Math.PI / 2 },
+      { name: 'Container_small', z: 10, scale: 1.0, rotationY: Math.PI / 4 },
+      { name: 'Trashcan', z: halfLen - 5, scale: 1.7, rotationY: Math.PI },
+    ];
+    const rightItems = [
+      { name: 'Tree_2', z: -halfLen + 30, y: 0.5, scale: 7, rotationY: Math.PI / 2 },
+      { name: 'ScifiContainer', z: 12, scale: 2.5, rotationY: -Math.PI / 4 },
+      { name: 'TrashContainerOpen', z: 26, scale: 1.2, rotationY: -Math.PI /2 },
+    ];
+
+    this._spawnDecorRow(group, leftX, leftItems);
+    this._spawnDecorRow(group, rightX, rightItems);
+  }
+
+  _spawnDecorRow(group, sideX, items) {
+    for (const item of items) {
+      const model = ModelManager.get(item.name);
+      if (!model) continue;
+
+      model.position.set(sideX, item.y ?? 0, item.z);
+      model.scale.setScalar(item.scale);
+      model.rotation.y = item.rotationY ?? 0;
+      model.traverse((child) => {
+        if (child.isMesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+        }
+      });
+      group.add(model);
     }
   }
 
