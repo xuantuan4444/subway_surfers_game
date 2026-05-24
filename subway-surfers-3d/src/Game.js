@@ -478,7 +478,7 @@ export class Game {
         const dz = playerPos.z - coinWorldPos.z;
         const dist = Math.sqrt(dx * dx + dz * dz);
         if (dist < radius && dist > 0.3) {
-          const speed = 25;
+          const speed = Math.max(25, this.player.forwardSpeed + 10);
           child.position.x += (dx / dist) * speed * delta;
           child.position.z += (dz / dist) * speed * delta;
         }
