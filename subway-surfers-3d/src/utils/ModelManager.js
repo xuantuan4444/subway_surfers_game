@@ -21,6 +21,8 @@ const MODEL_MAP = {
   TrafficLight2: 'models/Traffic light 2.glb',
   TrafficLight3: 'models/Traffic light 3.glb',
   TrafficLightB: 'models/Trafficlight B.glb',
+  SidewalkLeft: 'models/sidewalk/SIDEWALK_LEFT_NEW.glb',
+  SidewalkRight: 'models/sidewalk/SIDEWALK_RIGHT_NEW.glb',
 };
 
 class ModelManagerClass {

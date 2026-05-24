@@ -49,16 +49,13 @@ function createCoinGlowTexture() {
   c.height = 128;
   const ctx = c.getContext('2d');
   ctx.clearRect(0, 0, 128, 128);
-
   const cx = 64, cy = 64;
-
   const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, 40);
   grad.addColorStop(0, 'rgba(255,240,200,0.12)');
   grad.addColorStop(0.3, 'rgba(255,220,170,0.06)');
   grad.addColorStop(0.6, 'rgba(255,200,140,0.02)');
   grad.addColorStop(1, 'rgba(255,180,120,0)');
   ctx.fillStyle = grad;
-
   ctx.save();
   ctx.shadowColor = 'rgba(255,230,180,0)';
   ctx.shadowBlur = 0;
@@ -80,7 +77,6 @@ function createCoinGlowTexture() {
     ctx.restore();
   }
   ctx.restore();
-
   ctx.beginPath();
   ctx.arc(cx, cy, 6, 0, Math.PI * 2);
   const dot = ctx.createRadialGradient(cx, cy, 0, cx, cy, 6);
@@ -88,7 +84,6 @@ function createCoinGlowTexture() {
   dot.addColorStop(1, 'rgba(255,230,190,0)');
   ctx.fillStyle = dot;
   ctx.fill();
-
   return new THREE.CanvasTexture(c);
 }
 
@@ -136,8 +131,18 @@ export class TrackManager {
     this._brickNorGl.wrapS = this._brickNorGl.wrapT = THREE.RepeatWrapping;
     this._brickNorGl.repeat.set(0.5, 2);
 
+    // Roadside pool — khởi tạo sau initChunks
+    this._roadsidePool       = [];
+    this._roadsideModelLength = 0;
+    // measure sidewalk model length so we can tile without overlaps
+    this._measureRoadsideModelLength();
     this.initChunks();
+    // Roadside models are now spawned per-chunk so they reload with chunk recycling
   }
+
+  /* =========================================================
+     CHUNKS
+  ========================================================= */
 
   initChunks() {
     for (let i = 0; i < this.numChunks; i++) {
@@ -148,8 +153,13 @@ export class TrackManager {
       const chunkZ = chunk.position.z;
       const content = this.spawnManager.generateChunkContent(chunk, chunkZ);
       this.applyContentToChunk(chunk, content, chunkZ);
+        // spawn roadside GLB only if its model tile belongs to this chunk's span
+        this._maybeSpawnRoadsideForChunk(chunk);
 
-      this.chunks.push(chunk);
+        // mark baseChildCount after roadside spawn so roadside becomes part of base
+        chunk.userData.baseChildCount = chunk.children.length;
+
+        this.chunks.push(chunk);
     }
   }
 
@@ -178,9 +188,7 @@ export class TrackManager {
     // Vỉa hè 2 bên (texture gạch)
     const sideGeo = new THREE.BoxGeometry(3, 0.5, this.chunkLength);
     const uvAttr = sideGeo.getAttribute('uv');
-    if (uvAttr) {
-      sideGeo.setAttribute('uv2', uvAttr.clone());
-    }
+    if (uvAttr) sideGeo.setAttribute('uv2', uvAttr.clone());
     const sideMat = new THREE.MeshStandardMaterial({
       map: this._brickDiff,
       aoMap: this._brickArm,
@@ -201,7 +209,7 @@ export class TrackManager {
     sidewalkRight.userData = { isGround: true, type: 'sidewalk' };
     group.add(sidewalkRight);
 
-    // Mặt đất 2 bên (xám)
+    // Mặt đất 2 bên
     const grassMat = new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.9 });
     const grassLeft = new THREE.Mesh(new THREE.BoxGeometry(100, 0.5, this.chunkLength), grassMat);
     grassLeft.position.set(-59, 0.25, 0);
@@ -215,25 +223,151 @@ export class TrackManager {
     this._spawnLamps(group);
     this._spawnChunkDecor(group);
 
-    group.userData.baseChildCount = group.children.length;
+    // baseChildCount will be set by the caller after optional roadside spawn
     return group;
   }
+
+  /* =========================================================
+     ROADSIDE POOL (leapfrog — không spawn per-chunk)
+  ========================================================= */
+
+  /**
+   * Chỉnh 1 số duy nhất này để to / nhỏ.
+   * Tỉ lệ model giữ nguyên hoàn toàn (uniform scale).
+   */
+  get _roadsideScale() { return 10; } // ← CHỈNH TẠI ĐÂY (giảm kích thước mô hình vỉa hè)
+
+  _initRoadsidePool() {
+    // Dọn pool cũ (khi reset)
+    for (const entry of this._roadsidePool) {
+      if (entry.left)  this.scene.remove(entry.left);
+      if (entry.right) this.scene.remove(entry.right);
+    }
+    this._roadsidePool = [];
+
+    const SCALE     = this._roadsideScale;
+    const ANCHOR_X  = 10;
+    const POOL_SIZE = 3; // 3 instance/side đảm bảo liên tục khi model dài
+
+    // Đo chiều dài model sau scale để tính khoảng nhảy cóc
+    const sampleSrc = ModelManager.get('SidewalkLeft');
+    let modelLength = this.chunkLength * 2; // fallback
+    if (sampleSrc) {
+      const sample = sampleSrc.clone(true);
+      sample.scale.setScalar(SCALE);
+      sample.updateMatrixWorld(true);
+      const b = new THREE.Box3().setFromObject(sample);
+      if (!b.isEmpty()) modelLength = b.max.z - b.min.z;
+    }
+    this._roadsideModelLength = modelLength;
+
+    for (let i = 0; i < POOL_SIZE; i++) {
+      const startZ = -i * modelLength;
+
+      const left  = this._makeRoadsideMesh('SidewalkLeft',  -ANCHOR_X, SCALE);
+      const right = this._makeRoadsideMesh('SidewalkRight',  ANCHOR_X, SCALE);
+
+      if (left)  { left.position.z  = startZ; this.scene.add(left);  }
+      if (right) { right.position.z = startZ; this.scene.add(right); }
+
+      this._roadsidePool.push({ left, right, z: startZ });
+    }
+  }
+
+  _makeRoadsideMesh(modelName, anchorX, scale) {
+    const src = ModelManager.get(modelName);
+    if (!src) return null;
+
+    const clone = src.clone(true);
+    clone.traverse((child) => {
+      if (child.isMesh) {
+        child.castShadow    = true;
+        child.receiveShadow = true;
+      }
+    });
+
+    clone.scale.setScalar(scale);
+
+    // Căn X và Y — Z sẽ được pool manager điều khiển
+    clone.updateMatrixWorld(true);
+    const bounds = new THREE.Box3().setFromObject(clone);
+    if (bounds.isEmpty()) {
+      clone.position.x = anchorX;
+      return clone;
+    }
+
+    const center = new THREE.Vector3();
+    bounds.getCenter(center);
+
+    // Push roadside models slightly OUTSIDE the sidewalk so they don't overlap.
+    // Offset scales with model scale so larger models are pushed farther out.
+    const isLeftSide = anchorX < 0;
+    // smaller multiplier moves the models closer to the sidewalk
+    const OUTER_OFFSET = Math.max(1, Math.round(scale * 1)); // tunable: decreases with `scale` multiplier
+    clone.position.x = anchorX - center.x + (isLeftSide ? -OUTER_OFFSET : OUTER_OFFSET);
+    clone.position.y = -bounds.min.y; // đáy model chạm đất
+
+    return clone;
+  }
+
+  _updateRoadsidePool(playerZ) {
+    if (!this._roadsidePool.length) return;
+
+    const modelLength = this._roadsideModelLength;
+    const POOL_SIZE   = this._roadsidePool.length;
+    const totalLength = modelLength * POOL_SIZE;
+
+    // Z nhỏ nhất hiện tại trong pool (xa nhất phía trước)
+    let frontZ = Infinity;
+    for (const entry of this._roadsidePool) {
+      if (entry.z < frontZ) frontZ = entry.z;
+    }
+
+    for (const entry of this._roadsidePool) {
+      // Model đã lùi qua player → nhảy ra phía trước
+      if (entry.z > playerZ + modelLength) {
+        const newZ = frontZ - totalLength;
+        entry.z = newZ;
+        if (entry.left)  entry.left.position.z  = newZ;
+        if (entry.right) entry.right.position.z = newZ;
+        frontZ = newZ;
+      }
+    }
+
+    // Ensure there's always an instance placed near the fog far plane
+    // so the roadside repeats into the fog. Use scene.fog.far if available.
+    const fogFar = (this.scene && this.scene.fog && this.scene.fog.far) ? this.scene.fog.far : 150;
+    const desiredFrontZ = playerZ - fogFar + modelLength * 0.5; // target position at fog edge
+
+    // If the current front (smallest z) is still in front of desiredFrontZ, move the nearest entry forward.
+    if (frontZ > desiredFrontZ) {
+      // pick the entry with the largest z (closest to player) to move forward
+      let candidate = this._roadsidePool[0];
+      for (const e of this._roadsidePool) if (e.z > candidate.z) candidate = e;
+      candidate.z = desiredFrontZ;
+      if (candidate.left)  candidate.left.position.z  = desiredFrontZ;
+      if (candidate.right) candidate.right.position.z = desiredFrontZ;
+    }
+  }
+
+  /* =========================================================
+     LAMPS
+  ========================================================= */
 
   _spawnLamps(group) {
     const LAMP_INTERVAL = 24;
     const halfLen = this.chunkLength / 2;
 
-    const glowTex = createGlowDiscTexture();
-    const beamTex = createBeamTexture();
+    const glowTex    = createGlowDiscTexture();
+    const beamTex    = createBeamTexture();
     const bulbGlowTex = createBulbGlowTexture();
 
     for (let offset = -halfLen + 6; offset < halfLen - 6; offset += LAMP_INTERVAL) {
-      const side = (Math.floor(offset / LAMP_INTERVAL) % 2 === 0) ? -1 : 1;
+      const side  = (Math.floor(offset / LAMP_INTERVAL) % 2 === 0) ? -1 : 1;
       const wallX = side * 6.75;
       const lightZ = offset;
-      const bulbY = 6.8;
+      const bulbY  = 6.8;
 
-      // Load Streetlight.glb làm cột đèn
       let modelGroup = new THREE.Group();
       const src = ModelManager.get('Streetlight');
       if (src) {
@@ -242,28 +376,17 @@ export class TrackManager {
         modelGroup.scale.set(scale, scale, scale);
         modelGroup.rotation.y = side < 0 ? Math.PI : 0;
         modelGroup.traverse((child) => {
-          if (child.isMesh) {
-            child.castShadow = true;
-            child.receiveShadow = true;
-          }
+          if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
         });
       }
       modelGroup.position.set(wallX, 0, lightZ);
       group.add(modelGroup);
 
-      // Vị trí bóng đèn (đầu cần, không phải tâm trụ)
       const bulbX = wallX - side * 1.673;
-      const bulbGlow = new THREE.Sprite(
-        new THREE.SpriteMaterial({
-          map: bulbGlowTex,
-          blending: THREE.AdditiveBlending,
-          transparent: true,
-          opacity: 0,
-          depthWrite: false,
-          depthTest: false,
-          toneMapped: false,
-        })
-      );
+      const bulbGlow = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: bulbGlowTex, blending: THREE.AdditiveBlending,
+        transparent: true, opacity: 0, depthWrite: false, depthTest: false, toneMapped: false,
+      }));
       bulbGlow.scale.set(8, 8, 1);
       bulbGlow.position.set(bulbX, bulbY, lightZ);
       group.add(bulbGlow);
@@ -278,31 +401,21 @@ export class TrackManager {
       const glowDisc = new THREE.Mesh(
         new THREE.CircleGeometry(9, 32),
         new THREE.MeshBasicMaterial({
-          map: glowTex,
-          transparent: true,
-          opacity: 0,
-          depthWrite: false,
-          blending: THREE.AdditiveBlending,
+          map: glowTex, transparent: true, opacity: 0,
+          depthWrite: false, blending: THREE.AdditiveBlending,
         })
       );
       glowDisc.rotation.x = -Math.PI / 2;
       glowDisc.position.set(spotTarget.x, 0.02, spotTarget.z);
       group.add(glowDisc);
 
-      const beamSprite = new THREE.Sprite(
-        new THREE.SpriteMaterial({
-          map: beamTex,
-          blending: THREE.AdditiveBlending,
-          transparent: true,
-          opacity: 0,
-          depthWrite: false,
-          depthTest: false,
-          toneMapped: false,
-        })
-      );
-      const mid = new THREE.Vector3().addVectors(
-        new THREE.Vector3(bulbX, bulbY, lightZ), spotTarget
-      ).multiplyScalar(0.5);
+      const beamSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: beamTex, blending: THREE.AdditiveBlending,
+        transparent: true, opacity: 0, depthWrite: false, depthTest: false, toneMapped: false,
+      }));
+      const mid = new THREE.Vector3()
+        .addVectors(new THREE.Vector3(bulbX, bulbY, lightZ), spotTarget)
+        .multiplyScalar(0.5);
       beamSprite.position.copy(mid);
       beamSprite.scale.set(14, 9, 1);
       group.add(beamSprite);
@@ -311,48 +424,108 @@ export class TrackManager {
     }
   }
 
+  /* =========================================================
+     DECOR
+  ========================================================= */
+
   _spawnChunkDecor(group) {
-    const halfLen = this.chunkLength / 2;
-    const leftX = -7.5;
-    const rightX = 7.5;
+    const halfLen  = this.chunkLength / 2;
+    const leftX    = -7.5;
+    const rightX   =  7.5;
+
     const leftItems = [
-      { name: 'Tree_1', z: -halfLen + 30, y: 0.5, scale: 8, rotationY: -Math.PI / 2 },
-      { name: 'Chest', z: -10, scale: 5, rotationY: Math.PI / 2 },
-      { name: 'Container_small', z: 10, scale: 1.0, rotationY: Math.PI / 4 },
-      { name: 'Trashcan', z: halfLen - 5, scale: 1.7, rotationY: Math.PI },
+      { name: 'Tree_1',           z: -halfLen + 30, y: 0.5, scale: 8,   rotationY: -Math.PI / 2 },
+      { name: 'Chest',            z: -10,           scale: 5,            rotationY: Math.PI / 2  },
+      { name: 'Container_small',  z:  10,           scale: 1.0,          rotationY: Math.PI / 4  },
+      { name: 'Trashcan',         z:  halfLen - 5,  scale: 1.7,          rotationY: Math.PI      },
     ];
     const rightItems = [
-      { name: 'Tree_2', z: -halfLen + 30, y: 0.5, scale: 7, rotationY: Math.PI / 2 },
-      { name: 'ScifiContainer', z: 12, scale: 2.5, rotationY: -Math.PI / 4 },
-      { name: 'TrashContainerOpen', z: 26, scale: 1.2, rotationY: -Math.PI /2 },
+      { name: 'Tree_2',              z: -halfLen + 30, y: 0.5, scale: 7,   rotationY: Math.PI / 2  },
+      { name: 'ScifiContainer',      z:  12,           scale: 2.5,          rotationY: -Math.PI / 4 },
+      { name: 'TrashContainerOpen',  z:  26,           scale: 1.2,          rotationY: -Math.PI / 2 },
     ];
 
-    this._spawnDecorRow(group, leftX, leftItems);
+    this._spawnDecorRow(group, leftX,  leftItems);
     this._spawnDecorRow(group, rightX, rightItems);
+  }
+
+  _spawnRoadsideForChunk(group) {
+    // legacy: kept for compatibility but prefer using _spawnRoadsideAt
+    this._spawnRoadsideAt(group, 0);
+  }
+
+  _spawnRoadsideAt(group, localZ) {
+    const SCALE    = this._roadsideScale;
+    const ANCHOR_X = 9;
+
+    const left  = this._makeRoadsideMesh('SidewalkLeft',  -ANCHOR_X, SCALE);
+    const right = this._makeRoadsideMesh('SidewalkRight',  ANCHOR_X, SCALE);
+
+    if (left)  { left.position.z = localZ; left.userData = left.userData || {}; left.userData.isRoadside = true; group.add(left); }
+    if (right) { right.position.z = localZ; right.userData = right.userData || {}; right.userData.isRoadside = true; group.add(right); }
+  }
+
+  _maybeSpawnRoadsideForChunk(chunk) {
+    // ensure we measured model length
+    if (!this._roadsideModelLength || this._roadsideModelLength <= 0) this._measureRoadsideModelLength();
+    const modelLen = this._roadsideModelLength;
+    const half = this.chunkLength / 2;
+
+    // find the nearest tile center (multiples of modelLen)
+    const k = Math.round(chunk.position.z / modelLen);
+    const modelWorldZ = k * modelLen;
+
+    // spawn into this chunk only if modelWorldZ lies within this chunk's z-span
+    if (modelWorldZ >= chunk.position.z - half && modelWorldZ < chunk.position.z + half) {
+      const localZ = modelWorldZ - chunk.position.z;
+      this._spawnRoadsideAt(chunk, localZ);
+    }
+  }
+
+  _measureRoadsideModelLength() {
+    const SCALE = this._roadsideScale;
+    const sampleSrc = ModelManager.get('SidewalkLeft');
+    let modelLength = this.chunkLength * 2;
+    if (sampleSrc) {
+      const sample = sampleSrc.clone(true);
+      sample.scale.setScalar(SCALE);
+      sample.updateMatrixWorld(true);
+      const b = new THREE.Box3().setFromObject(sample);
+      if (!b.isEmpty()) modelLength = b.max.z - b.min.z;
+    }
+    this._roadsideModelLength = modelLength;
   }
 
   _spawnDecorRow(group, sideX, items) {
     for (const item of items) {
       const model = ModelManager.get(item.name);
       if (!model) continue;
-
       model.position.set(sideX, item.y ?? 0, item.z);
       model.scale.setScalar(item.scale);
       model.rotation.y = item.rotationY ?? 0;
       model.traverse((child) => {
-        if (child.isMesh) {
-          child.castShadow = true;
-          child.receiveShadow = true;
-        }
+        if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
       });
       group.add(model);
     }
   }
 
-  clearChunkDynamicContent(group) {
+  /* =========================================================
+     CHUNK CONTENT
+  ========================================================= */
+
+  clearChunkDynamicContent(group, playerZ) {
     const baseChildCount = group.userData?.baseChildCount ?? 0;
+    const REMOVE_BUFFER = 5; // keep roadside until player passes this far past the model
     for (let i = group.children.length - 1; i >= baseChildCount; i--) {
       const child = group.children[i];
+      // If this is a roadside model, only remove it when player has passed its world Z + buffer
+      if (child.userData?.isRoadside && typeof playerZ === 'number') {
+        const childWorldZ = group.position.z + child.position.z;
+        if (playerZ <= childWorldZ + REMOVE_BUFFER) {
+          continue; // skip removal for now
+        }
+      }
       this._disposeChild(child);
       group.remove(child);
     }
@@ -375,137 +548,106 @@ export class TrackManager {
         this._spawnPatternObstacle(chunk, obs, chunkZ);
       }
     }
-
-    for (const train of (content.trains || [])) {
-      this._spawnPatternTrain(chunk, train, chunkZ);
-    }
-
-    for (const coin of (content.coins || [])) {
-      this._spawnPatternCoin(chunk, coin);
-    }
-
-    for (const pu of (content.powerUps || [])) {
-      this._spawnPatternPowerUp(chunk, pu);
-    }
+    for (const train of (content.trains  || [])) this._spawnPatternTrain(chunk, train, chunkZ);
+    for (const coin  of (content.coins   || [])) this._spawnPatternCoin(chunk, coin);
+    for (const pu    of (content.powerUps || [])) this._spawnPatternPowerUp(chunk, pu);
 
     chunk.userData.baseChildCount = baseCount;
   }
 
   _spawnPatternObstacle(chunk, obs, chunkZ) {
     switch (obs.type) {
-      case OBSTACLE.LOW_BARRIER:
-        this._spawnLowBarrier(chunk, obs);
-        break;
-      case OBSTACLE.HIGH_BARRIER:
-        this._spawnHighBarrier(chunk, obs);
-        break;
+      case OBSTACLE.LOW_BARRIER:  this._spawnLowBarrier(chunk, obs);  break;
+      case OBSTACLE.HIGH_BARRIER: this._spawnHighBarrier(chunk, obs); break;
     }
   }
 
   _spawnLowBarrier(chunk, obs) {
-    const xPos = obs.x;
-    const zPos = obs.z;
-
-    const barrierWidth = 2.5;
-    const barrierHeight = 1.5;
-    const barrierLength = 1;
-    const barrierGeo = new THREE.BoxGeometry(barrierWidth, barrierHeight, barrierLength);
-    const barrierMat = new THREE.MeshStandardMaterial({ color: 0xff3333 });
-
-    const barrier = new THREE.Mesh(barrierGeo, barrierMat);
-    barrier.position.set(xPos, barrierHeight / 2, zPos);
-    barrier.castShadow = true;
-    barrier.receiveShadow = true;
+    const barrierWidth = 2.5, barrierHeight = 1.5, barrierLength = 1;
+    const barrier = new THREE.Mesh(
+      new THREE.BoxGeometry(barrierWidth, barrierHeight, barrierLength),
+      new THREE.MeshStandardMaterial({ color: 0xff3333 })
+    );
+    barrier.position.set(obs.x, barrierHeight / 2, obs.z);
+    barrier.castShadow = barrier.receiveShadow = true;
     barrier.userData = { type: 'obstacle', lane: obs.lane, isGround: true };
     chunk.add(barrier);
   }
 
   _spawnHighBarrier(chunk, obs) {
-    const xPos = obs.x;
-    const zPos = obs.z;
-
     const barrierGroup = new THREE.Group();
     const uMat = new THREE.MeshStandardMaterial({ color: 0xffaa00, roughness: 0.4 });
 
     const pillarGeo = new THREE.BoxGeometry(0.3, 2.4, 0.3);
     const pillarL = new THREE.Mesh(pillarGeo, uMat);
     pillarL.position.set(-1.1, 1.2, 0);
-    pillarL.castShadow = true;
-    pillarL.receiveShadow = true;
+    pillarL.castShadow = pillarL.receiveShadow = true;
     barrierGroup.add(pillarL);
     const pillarR = pillarL.clone();
     pillarR.position.set(1.1, 1.2, 0);
-    pillarR.castShadow = true;
-    pillarR.receiveShadow = true;
+    pillarR.castShadow = pillarR.receiveShadow = true;
     barrierGroup.add(pillarR);
 
-    const boardGeo = new THREE.BoxGeometry(2.5, 2.0, 0.8);
-    const boardMat = new THREE.MeshStandardMaterial({ color: 0xffaa00, roughness: 0.4 });
-    const board = new THREE.Mesh(boardGeo, boardMat);
+    const board = new THREE.Mesh(
+      new THREE.BoxGeometry(2.5, 2.0, 0.8),
+      new THREE.MeshStandardMaterial({ color: 0xffaa00, roughness: 0.4 })
+    );
     board.position.set(0, 3.5, 0);
-    board.castShadow = true;
-    board.receiveShadow = true;
+    board.castShadow = board.receiveShadow = true;
     board.userData = { type: 'obstacle', lane: obs.lane, requiresSlide: true };
     barrierGroup.add(board);
 
-    barrierGroup.position.set(xPos, 0, zPos);
+    barrierGroup.position.set(obs.x, 0, obs.z);
     barrierGroup.userData = { type: 'obstacle', lane: obs.lane, requiresSlide: true };
     chunk.add(barrierGroup);
   }
 
   _spawnPatternTrain(chunk, train, chunkZ) {
-    const xPos = train.x;
-    const zPos = train.z;
+    const xPos     = train.x;
+    const zPos     = train.z;
     const isMoving = train.isMoving;
-    const isDual = train.isDual || false;
-    const cars = Math.min(train.cars || 1, 3);
-    const hasRamp = train.hasRamp !== false;
+    const isDual   = train.isDual || false;
+    const cars     = Math.min(train.cars || 1, 3);
+    const hasRamp  = train.hasRamp !== false;
 
-    const CAR_LENGTH = 20;
-    const trainWidth = 2.6;
+    const CAR_LENGTH  = 20;
+    const trainWidth  = 2.6;
     const trainHeight = 4;
 
     const trainGroup = new THREE.Group();
 
     for (let i = 0; i < cars; i++) {
-      const carOffsetZ = -i * CAR_LENGTH;
-      const isHead = (!isMoving && hasRamp && i === 0);
+      const carOffsetZ    = -i * CAR_LENGTH;
+      const isHead        = (!isMoving && hasRamp && i === 0);
       const thisRampLength = isHead ? 8 : 0;
 
       let carMesh;
       if (isHead) {
-        // Đầu tàu: ExtrudeGeometry unified (body + ramp)
-        // z ∈ [-10, 18]
-        const halfLen = CAR_LENGTH / 2;
+        const halfLen    = CAR_LENGTH / 2;
         const rampStartZ = halfLen + thisRampLength;
-        const frontZ = -halfLen;
+        const frontZ     = -halfLen;
         const profile = new THREE.Shape()
           .moveTo(rampStartZ, 0)
-          .lineTo(halfLen, trainHeight)
-          .lineTo(frontZ, trainHeight)
-          .lineTo(frontZ, 0)
+          .lineTo(halfLen,  trainHeight)
+          .lineTo(frontZ,   trainHeight)
+          .lineTo(frontZ,   0)
           .lineTo(rampStartZ, 0);
         const geo = new THREE.ExtrudeGeometry(profile, {
-          depth: trainWidth, bevelEnabled: false, steps: 1
+          depth: trainWidth, bevelEnabled: false, steps: 1,
         });
         geo.translate(0, 0, -trainWidth / 2);
         geo.rotateY(-Math.PI / 2);
-        const mat = new THREE.MeshStandardMaterial({ color: 0x1a2b4c, roughness: 0.7 });
-        carMesh = new THREE.Mesh(geo, mat);
+        carMesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x1a2b4c, roughness: 0.7 }));
       } else {
-        // Thân tàu / moving train: BoxGeometry (no ramp)
-        // z ∈ [-10, 10]
         const geo = new THREE.BoxGeometry(trainWidth, trainHeight, CAR_LENGTH);
         geo.translate(0, trainHeight / 2, 0);
-        const mat = new THREE.MeshStandardMaterial({
-          color: isMoving ? 0xff5a1f : 0x1a2b4c, roughness: 0.7
-        });
-        carMesh = new THREE.Mesh(geo, mat);
+        carMesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+          color: isMoving ? 0xff5a1f : 0x1a2b4c, roughness: 0.7,
+        }));
       }
 
       carMesh.position.set(0, 0, carOffsetZ);
-      carMesh.castShadow = true;
-      carMesh.receiveShadow = true;
+      carMesh.castShadow = carMesh.receiveShadow = true;
       carMesh.userData = {
         type: 'obstacle',
         lane: train.lane,
@@ -513,61 +655,34 @@ export class TrackManager {
         movingTrain: isMoving || undefined,
         isTrainPart: true,
         walkableProfile: {
-            kind: 'train',
-            trainWidth,
-            trainHeight,
-            trainLength: CAR_LENGTH,
-            rampLength: thisRampLength,
+          kind: 'train', trainWidth, trainHeight,
+          trainLength: CAR_LENGTH, rampLength: thisRampLength,
         },
-    };
+      };
       trainGroup.add(carMesh);
     }
 
     const totalTrainLength = CAR_LENGTH * cars;
-
     trainGroup.position.set(xPos, 0, zPos);
-    trainGroup.userData = {
-      type: 'train',
-      lane: train.lane,
-      cars,
-      hasRamp,
-      trainWidth,
-      trainHeight,
-      trainLength: totalTrainLength,
-      rampLength: hasRamp && !isMoving ? 8 : 0,
-      movingTrain: isMoving || undefined,
-    };
 
     if (isMoving) {
-      const baseMin = 12;
-      const baseMax = 16;
-      const ratio = this._playerSpeed / 18;
-      const minSpeed = Math.round(baseMin * ratio * 10) / 10;
-      const maxSpeed = Math.round(baseMax * ratio * 10) / 10;
+      const ratio    = this._playerSpeed / 18;
+      const minSpeed = Math.round(12 * ratio * 10) / 10;
+      const maxSpeed = Math.round(16 * ratio * 10) / 10;
       trainGroup.userData = {
-        type: 'train',
-        lane: train.lane,
-        cars,
-        trainWidth,
-        trainHeight,
-        trainLength: totalTrainLength,
-        rampLength: 0,
+        type: 'train', lane: train.lane, cars,
+        trainWidth, trainHeight, trainLength: totalTrainLength, rampLength: 0,
         movingTrain: true,
         trainMotion: {
           speed: THREE.MathUtils.randFloat(minSpeed, maxSpeed),
-          distanceTraveled: 0,
-          initialZ: zPos,
-        }
+          distanceTraveled: 0, initialZ: zPos,
+        },
       };
     } else {
       trainGroup.userData = {
-        type: 'train',
-        lane: train.lane,
-        cars,
-        trainWidth,
-        trainHeight,
-        trainLength: totalTrainLength,
-        rampLength: hasRamp && !isMoving ? 8 : 0,
+        type: 'train', lane: train.lane, cars,
+        trainWidth, trainHeight, trainLength: totalTrainLength,
+        rampLength: hasRamp ? 8 : 0,
       };
     }
 
@@ -576,32 +691,25 @@ export class TrackManager {
       for (let i = 0; i < cars; i++) {
         const carOffsetZ = -i * CAR_LENGTH;
         for (let j = 0; j < coinsPerCar; j++) {
-          const coinGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.1, 16);
-          const coinMat = new THREE.MeshStandardMaterial({
-            color: 0xffd700, metalness: 0.8, roughness: 0.2,
-            emissive: 0xffd700, emissiveIntensity: 0.15,
-          });
-          const coin = new THREE.Mesh(coinGeo, coinMat);
+          const coin = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.4, 0.4, 0.1, 16),
+            new THREE.MeshStandardMaterial({
+              color: 0xffd700, metalness: 0.8, roughness: 0.2,
+              emissive: 0xffd700, emissiveIntensity: 0.15,
+            })
+          );
           coin.rotation.x = Math.PI / 2;
           coin.castShadow = true;
-          const coinZ = carOffsetZ - 8 + j * 3.2;
-          coin.position.set(0, trainHeight + 1.5, coinZ);
+          coin.position.set(0, trainHeight + 1.5, carOffsetZ - 8 + j * 3.2);
           coin.userData = { type: 'coin', lane: train.lane, value: 10, rotateSpeed: 3, sparklePhase: Math.random() * Math.PI * 2 };
 
-    const glowMat = new THREE.SpriteMaterial({
-      map: this._coinGlowTex,
-      blending: THREE.AdditiveBlending,
-      transparent: true,
-      opacity: 0.18,
-      depthWrite: false,
-      color: 0xffdd55,
-    });
-    const glow = new THREE.Sprite(glowMat);
-    glow.scale.set(1.8, 1.8, 1);
-          glow.position.y = 0;
+          const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: this._coinGlowTex, blending: THREE.AdditiveBlending,
+            transparent: true, opacity: 0.18, depthWrite: false, color: 0xffdd55,
+          }));
+          glow.scale.set(1.8, 1.8, 1);
           glow.userData = { coinParent: coin };
           coin.add(glow);
-
           trainGroup.add(coin);
         }
       }
@@ -610,96 +718,66 @@ export class TrackManager {
     chunk.add(trainGroup);
 
     if (isDual) {
-      const oppositeLane = train.lane === LANE.LEFT ? LANE.RIGHT : LANE.LEFT;
-      const oppX = LaneUtils.laneToWorldX(oppositeLane);
-      const oppTrain = { ...train, lane: oppositeLane, x: oppX };
-      this._spawnPatternTrain(chunk, oppTrain, chunkZ);
+      const oppLane = train.lane === LANE.LEFT ? LANE.RIGHT : LANE.LEFT;
+      this._spawnPatternTrain(chunk, { ...train, lane: oppLane, x: LaneUtils.laneToWorldX(oppLane) }, chunkZ);
     }
   }
 
   _spawnPatternCoin(chunk, coin) {
-    const geo = new THREE.CylinderGeometry(0.4, 0.4, 0.1, 16);
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0xffd700,
-      metalness: 0.8,
-      roughness: 0.2,
-      emissive: 0xffd700,
-      emissiveIntensity: 0.15,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
+    const mesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.4, 0.4, 0.1, 16),
+      new THREE.MeshStandardMaterial({
+        color: 0xffd700, metalness: 0.8, roughness: 0.2,
+        emissive: 0xffd700, emissiveIntensity: 0.15,
+      })
+    );
     mesh.rotation.x = Math.PI / 2;
     mesh.castShadow = true;
-    mesh.position.set(
-      coin.x,
-      coin.altitude || 2,
-      coin.z
-    );
-    mesh.userData = {
-      type: 'coin',
-      lane: coin.lane,
-      value: coin.value || 10,
-      rotateSpeed: 3,
-      sparklePhase: Math.random() * Math.PI * 2,
-    };
+    mesh.position.set(coin.x, coin.altitude || 2, coin.z);
+    mesh.userData = { type: 'coin', lane: coin.lane, value: coin.value || 10, rotateSpeed: 3, sparklePhase: Math.random() * Math.PI * 2 };
 
-    const glowMat = new THREE.SpriteMaterial({
-      map: this._coinGlowTex,
-      blending: THREE.AdditiveBlending,
-      transparent: true,
-      opacity: 0.18,
-      depthWrite: false,
-      color: 0xffdd55,
-    });
-    const glow = new THREE.Sprite(glowMat);
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: this._coinGlowTex, blending: THREE.AdditiveBlending,
+      transparent: true, opacity: 0.18, depthWrite: false, color: 0xffdd55,
+    }));
     glow.scale.set(3, 3, 1);
-    glow.position.y = 0;
     glow.userData = { coinParent: mesh };
-
     mesh.add(glow);
     chunk.add(mesh);
   }
 
   _spawnPatternPowerUp(chunk, pu) {
     const cfg = POWERUP_CONFIG[pu.powerUpType] || POWERUP_CONFIG[POWERUP.SCORE_2X];
-    const geo = new THREE.SphereGeometry(0.5, 12, 12);
-    const mat = new THREE.MeshStandardMaterial({
-      color: cfg.color,
-      emissive: cfg.emissive,
-      emissiveIntensity: 0.3,
-      metalness: 0.3,
-      roughness: 0.4,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.5, 12, 12),
+      new THREE.MeshStandardMaterial({
+        color: cfg.color, emissive: cfg.emissive, emissiveIntensity: 0.3,
+        metalness: 0.3, roughness: 0.4,
+      })
+    );
     mesh.castShadow = true;
     mesh.position.set(pu.x, 2.2, pu.z);
-    mesh.userData = {
-      type: 'powerup',
-      powerUpType: pu.powerUpType,
-    };
+    mesh.userData = { type: 'powerup', powerUpType: pu.powerUpType };
 
-    const glowMat = new THREE.SpriteMaterial({
-      map: this._coinGlowTex,
-      blending: THREE.AdditiveBlending,
-      transparent: true,
-      opacity: 0.3,
-      depthWrite: false,
-      color: cfg.color,
-    });
-    const glow = new THREE.Sprite(glowMat);
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: this._coinGlowTex, blending: THREE.AdditiveBlending,
+      transparent: true, opacity: 0.3, depthWrite: false, color: cfg.color,
+    }));
     glow.scale.set(4, 4, 1);
-    glow.position.y = 0;
     mesh.add(glow);
-
     chunk.add(mesh);
   }
 
+  /* =========================================================
+     UPDATE
+  ========================================================= */
+
   update(delta, speed, playerZ, playerLane) {
-    this._playerZ = playerZ;
+    this._playerZ     = playerZ;
     this._playerSpeed = speed;
     this.spawnManager.update(delta, speed, playerZ, playerLane);
     this.animateCoins(delta);
     this.animatePowerUps(delta);
-
     this.animateTrains(delta);
     this._updateLamps(delta);
 
@@ -722,22 +800,33 @@ export class TrackManager {
         }
         if (playerNearTrain) continue;
 
+        // If this chunk contains roadside models that the player hasn't passed yet,
+        // don't recycle it — keep it until player moves past them.
+        const REMOVE_BUFFER = 5;
+        const hasUnpassedRoadside = chunk.children.some((c) => {
+          if (!c.userData?.isRoadside) return false;
+          const worldZ = chunk.position.z + c.position.z;
+          return playerZ <= worldZ + REMOVE_BUFFER;
+        });
+        if (hasUnpassedRoadside) continue;
+
         this.spawnManager.clearChunkData(chunk);
-        this.clearChunkDynamicContent(chunk);
+        this.clearChunkDynamicContent(chunk, playerZ);
 
         const newZ = frontZ - this.chunkLength;
         chunk.position.z = newZ;
 
         const content = this.spawnManager.generateChunkContent(chunk, newZ);
         this.applyContentToChunk(chunk, content, newZ);
+        // after recycling chunk, possibly spawn roadside model for its new position
+        this._maybeSpawnRoadsideForChunk(chunk);
+        // update baseChildCount so roadside (if spawned) becomes base for this recycled chunk
+        chunk.userData.baseChildCount = chunk.children.length;
 
-        // Retroactive scene cleanup: remove obstacle meshes from existing chunks that overlap with new trains
         const clearList = this.spawnManager.getRetroactiveClearList();
         for (const entry of clearList) {
           const targetChunk = this.chunks.find(c => c.uuid === entry.chunkUuid);
-          if (targetChunk) {
-            this._removeObstaclesInRange(targetChunk, entry);
-          }
+          if (targetChunk) this._removeObstaclesInRange(targetChunk, entry);
         }
       }
     }
@@ -747,23 +836,22 @@ export class TrackManager {
     const toRemove = [];
     for (const child of chunk.children) {
       if (child.userData?.type !== 'obstacle') continue;
-      if (child.userData?.walkableProfile) continue; // Skip train meshes
+      if (child.userData?.walkableProfile) continue;
       const objWorldZ = chunk.position.z + child.position.z;
-      const objLane = child.userData.lane;
+      const objLane   = child.userData.lane;
       if (objLane === undefined) continue;
-      let shouldRemove = false;
       if (objLane === entry.trainLane && objWorldZ >= entry.clearStartZ && objWorldZ <= entry.clearEndZ) {
-        shouldRemove = true;
+        toRemove.push(child);
       } else if (entry.adjLanes.includes(objLane) && objWorldZ >= entry.bodyStartZ && objWorldZ <= entry.bodyEndZ) {
-        shouldRemove = true;
+        toRemove.push(child);
       }
-      if (shouldRemove) toRemove.push(child);
     }
-    for (const obj of toRemove) {
-      this._disposeChild(obj);
-      chunk.remove(obj);
-    }
+    for (const obj of toRemove) { this._disposeChild(obj); chunk.remove(obj); }
   }
+
+  /* =========================================================
+     ANIMATE
+  ========================================================= */
 
   animateTrains(delta) {
     this.chunks.forEach(chunk => {
@@ -781,21 +869,17 @@ export class TrackManager {
     const t = this._coinSparkleTimer;
     this.chunks.forEach(chunk => {
       chunk.traverse((child) => {
-        if (child.userData && child.userData.type === 'coin' && child.userData.rotateSpeed) {
-          child.rotation.z += child.userData.rotateSpeed * delta;
-          const phase = child.userData.sparklePhase || 0;
-          const sparkle = 0.5 + 0.5 * Math.sin(t * 2.5 + phase);
-          if (child.material) {
-            child.material.emissiveIntensity = 0.1 + 0.08 * sparkle;
+        if (!child.userData?.type === 'coin' || !child.userData?.rotateSpeed) return;
+        child.rotation.z += child.userData.rotateSpeed * delta;
+        const sparkle = 0.5 + 0.5 * Math.sin(t * 2.5 + (child.userData.sparklePhase || 0));
+        if (child.material) child.material.emissiveIntensity = 0.1 + 0.08 * sparkle;
+        child.traverse((c) => {
+          if (c.isSprite) {
+            c.material.opacity = 0.1 + 0.1 * sparkle;
+            const s = 1.4 + 0.5 * sparkle;
+            c.scale.set(s, s, 1);
           }
-          child.traverse((c) => {
-            if (c.isSprite) {
-              c.material.opacity = 0.1 + 0.1 * sparkle;
-              const s = 1.4 + 0.5 * sparkle;
-              c.scale.set(s, s, 1);
-            }
-          });
-        }
+        });
       });
     });
   }
@@ -805,12 +889,10 @@ export class TrackManager {
     const t = this._coinSparkleTimer;
     this.chunks.forEach(chunk => {
       chunk.traverse((child) => {
-        if (!child.userData || child.userData.type !== 'powerup') return;
+        if (child.userData?.type !== 'powerup') return;
         child.rotation.y += 3 * delta;
         const pulse = 0.5 + 0.5 * Math.sin(t * 3 + child.id);
-        if (child.material) {
-          child.material.emissiveIntensity = 0.2 + 0.25 * pulse;
-        }
+        if (child.material) child.material.emissiveIntensity = 0.2 + 0.25 * pulse;
         child.traverse((c) => {
           if (c.isSprite) {
             c.material.opacity = 0.2 + 0.2 * pulse;
@@ -822,53 +904,53 @@ export class TrackManager {
     });
   }
 
+  /* =========================================================
+     LAMPS
+  ========================================================= */
+
   setLampIntensity(v) {
     this._lampTargetIntensity = Math.max(0, Math.min(1, v));
   }
 
   _updateLamps(delta) {
     const speed = 2;
-    if (this._lampCurrentIntensity < this._lampTargetIntensity) {
-      this._lampCurrentIntensity = Math.min(this._lampTargetIntensity, this._lampCurrentIntensity + speed * delta);
-    } else {
-      this._lampCurrentIntensity = Math.max(this._lampTargetIntensity, this._lampCurrentIntensity - speed * delta);
-    }
+    this._lampCurrentIntensity = this._lampCurrentIntensity < this._lampTargetIntensity
+      ? Math.min(this._lampTargetIntensity, this._lampCurrentIntensity + speed * delta)
+      : Math.max(this._lampTargetIntensity, this._lampCurrentIntensity - speed * delta);
 
     const intensity = this._lampCurrentIntensity;
     for (const entry of this.lampLights) {
-      entry.light.intensity = intensity * 250;
+      entry.light.intensity         = intensity * 250;
       entry.bulbGlow.material.opacity = intensity * 0.5;
       entry.glowDisc.material.opacity = intensity * 0.5;
       entry.beamSprite.material.opacity = intensity * 0.25;
     }
   }
 
+  /* =========================================================
+     RESET
+  ========================================================= */
+
   reset(options = {}) {
     const { includeCoins = true } = options;
     this.spawnManager.reset();
     this._playerSpeed = 18;
-    for (const chunk of this.chunks) {
-      this.scene.remove(chunk);
-    }
-    this.chunks = [];
+    for (const chunk of this.chunks) this.scene.remove(chunk);
+    this.chunks    = [];
     this.lampLights = [];
-    this._lampTargetIntensity = 0;
+    this._lampTargetIntensity  = 0;
     this._lampCurrentIntensity = 0;
     this.initChunks();
+    // Roadside pool disabled — roadside meshes spawn per-chunk in createBaseChunk
 
-    if (!includeCoins) {
-      this.clearAllCoins();
-    }
+    if (!includeCoins) this.clearAllCoins();
   }
 
   clearAllCoins() {
     for (const chunk of this.chunks) {
       for (let i = chunk.children.length - 1; i >= 0; i--) {
         const child = chunk.children[i];
-        if (child.userData?.type === 'coin') {
-          this._disposeChild(child);
-          chunk.remove(child);
-        }
+        if (child.userData?.type === 'coin') { this._disposeChild(child); chunk.remove(child); }
       }
     }
   }
