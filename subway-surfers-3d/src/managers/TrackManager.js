@@ -919,10 +919,10 @@ export class TrackManager {
     const panelMat = this._barrierMat.clone();
     const frameMat = this._barrierFrameMat.clone();
 
-    const postGeo = new THREE.BoxGeometry(0.22, 1.45, 0.32);
+    const postGeo = new THREE.BoxGeometry(0.22, 2.28, 0.32);
     const footGeo = new THREE.BoxGeometry(0.62, 0.18, 0.72);
     const leftPost = new THREE.Mesh(postGeo, frameMat);
-    leftPost.position.set(-1.12, 0.78, 0);
+    leftPost.position.set(-1.12, 1.25, 0);
     leftPost.castShadow = leftPost.receiveShadow = true;
     barrierGroup.add(leftPost);
 
@@ -939,10 +939,10 @@ export class TrackManager {
     }
 
     const panel = new THREE.Mesh(
-      new THREE.BoxGeometry(2.1, 0.38, 0.42),
+      new THREE.BoxGeometry(2.1, 0.5, 0.42),
       panelMat
     );
-    panel.position.set(0, 1.08, 0);
+    panel.position.set(0, 2.05, 0);
     panel.castShadow = panel.receiveShadow = true;
     barrierGroup.add(panel);
 
@@ -950,17 +950,9 @@ export class TrackManager {
       new THREE.BoxGeometry(2.55, 0.16, 0.5),
       frameMat.clone()
     );
-    topRail.position.set(0, 1.34, 0);
+    topRail.position.set(0, 2.38, 0);
     topRail.castShadow = topRail.receiveShadow = true;
     barrierGroup.add(topRail);
-
-    const bottomRail = new THREE.Mesh(
-      new THREE.BoxGeometry(2.55, 0.16, 0.42),
-      frameMat.clone()
-    );
-    bottomRail.position.set(0, 0.12, 0);
-    bottomRail.castShadow = bottomRail.receiveShadow = true;
-    barrierGroup.add(bottomRail);
 
     barrierGroup.position.set(obs.x, 0, obs.z);
     barrierGroup.userData = {
@@ -997,14 +989,14 @@ export class TrackManager {
     const panelMat = this._barrierMat.clone();
     const frameMat = this._barrierFrameMat.clone();
 
-    const pillarGeo = new THREE.BoxGeometry(0.26, 3.55, 0.34);
+    const pillarGeo = new THREE.BoxGeometry(0.26, 3.72, 0.34);
     const footGeo = new THREE.BoxGeometry(0.72, 0.2, 0.8);
     const pillarL = new THREE.Mesh(pillarGeo, frameMat);
-    pillarL.position.set(-1.18, 1.78, 0);
+    pillarL.position.set(-1.18, 1.86, 0);
     pillarL.castShadow = pillarL.receiveShadow = true;
     barrierGroup.add(pillarL);
     const pillarR = pillarL.clone();
-    pillarR.position.set(1.18, 1.78, 0);
+    pillarR.position.set(1.18, 1.86, 0);
     pillarR.castShadow = pillarR.receiveShadow = true;
     barrierGroup.add(pillarR);
 
@@ -1019,12 +1011,12 @@ export class TrackManager {
       new THREE.BoxGeometry(2.2, 1.3, 0.58),
       panelMat
     );
-    board.position.set(0, 2.86, 0);
+    board.position.set(0, 3.0, 0);
     board.castShadow = board.receiveShadow = true;
     barrierGroup.add(board);
 
     const topRail = new THREE.Mesh(new THREE.BoxGeometry(2.65, 0.18, 0.76), frameMat.clone());
-    topRail.position.set(0, 3.62, 0);
+    topRail.position.set(0, 3.8, 0);
     topRail.castShadow = topRail.receiveShadow = true;
     barrierGroup.add(topRail);
 

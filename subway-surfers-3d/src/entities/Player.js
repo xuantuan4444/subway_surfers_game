@@ -429,11 +429,6 @@ export class Player {
         }
 
         const isOnGround = Math.abs(this.mesh.position.y - targetY) < 0.1 && !this.isJumping;
-        const platformMotion = isOnGround ? this._getPlatformMotion(this._currentPlatform) : null;
-        if (platformMotion) {
-            this.mesh.position.z += platformMotion.speed * delta;
-        }
-
         if (this._wasInAir && isOnGround) {
             const onTrain = closestObject?.userData?.walkableProfile?.kind === 'train';
             if (this.audio) this.audio.play(onTrain ? 'trainLanding' : 'landing', { volume: onTrain ? 0.4 : 0.25 });
