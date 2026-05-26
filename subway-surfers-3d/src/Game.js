@@ -601,7 +601,8 @@ export class Game {
           const speed = Math.max(25, this.player.forwardSpeed + 10);
           child.position.x += (dx / dist) * speed * delta;
           child.position.z += (dz / dist) * speed * delta;
-          const scale = 1 + (1 - dist / radius) * 0.45;
+          const t = 1 - dist / radius;
+          const scale = 1 + 0.8 * Math.sin(Math.PI * t);
           this._magnetScaleVec.set(scale, scale, scale);
           child.scale.lerp(this._magnetScaleVec, Math.min(1, 10 * delta));
           child.userData.magnetScaled = true;

@@ -267,6 +267,21 @@ export class TrackManager {
     this._graniteNorGl.wrapS = this._graniteNorGl.wrapT = THREE.RepeatWrapping;
     this._graniteNorGl.repeat.set(20, 12);
 
+    const metalDir = 'textures/rusty_metal/';
+    this._rustyDiff = loader.load(metalDir + 'rusty_metal_grid_diff_1k.png');
+    this._rustyDiff.colorSpace = THREE.SRGBColorSpace;
+    this._rustyArm = loader.load(metalDir + 'rusty_metal_grid_arm_1k.png');
+    this._rustyNorGl = loader.load(metalDir + 'rusty_metal_grid_nor_gl_1k.png');
+    this._rustyMetalMat = new THREE.MeshStandardMaterial({
+      map: this._rustyDiff,
+      roughness: 0.6,
+      metalness: 0.9,
+      roughnessMap: this._rustyArm,
+      metalnessMap: this._rustyArm,
+      normalMap: this._rustyNorGl,
+      envMapIntensity: 1.2,
+    });
+
     this._initFogEdges();
 
     // Roadside pool — khởi tạo sau initChunks
@@ -348,13 +363,18 @@ export class TrackManager {
       const chunkZ = chunk.position.z;
       const content = this.spawnManager.generateChunkContent(chunk, chunkZ);
       this.applyContentToChunk(chunk, content, chunkZ);
-        // spawn roadside GLB only if its model tile belongs to this chunk's span
-        this._maybeSpawnRoadsideForChunk(chunk);
 
-        // mark baseChildCount after roadside spawn so roadside becomes part of base
-        chunk.userData.baseChildCount = chunk.children.length;
+      // spawn roadside GLB only if its model tile belongs to this chunk's span
+      this._maybeSpawnRoadsideForChunk(chunk);
+      this.chunks.push(chunk);
 
-        this.chunks.push(chunk);
+      // Flush retroactive clears immediately during init so obstacles don't
+      // "spawn then disappear" later when the player can see the chunk.
+      const clearList = this.spawnManager.getRetroactiveClearList();
+      for (const entry of clearList) {
+        const targetChunk = this.chunks.find((c) => c.uuid === entry.chunkUuid);
+        if (targetChunk) this._removeObstaclesInRange(targetChunk, entry, { ignoreActiveView: true });
+      }
     }
   }
 
@@ -430,7 +450,10 @@ export class TrackManager {
     this._spawnLamps(group);
     this._spawnChunkDecor(group);
 
-    // baseChildCount will be set by the caller after optional roadside spawn
+    // Track how many children belong to the static base of the chunk.
+    // Everything added later (roadside, trains, obstacles, coins, power-ups)
+    // is treated as dynamic and will be cleared on recycle.
+    group.userData.baseChildCount = group.children.length;
     return group;
   }
 
@@ -777,13 +800,6 @@ export class TrackManager {
     frontRim.castShadow = frontRim.receiveShadow = true;
     mesh.add(frontRim);
 
-    const backRim = new THREE.Mesh(rimGeo.clone(), this._coinRimMat.clone());
-    backRim.rotation.x = Math.PI / 2;
-    backRim.position.y = -0.056;
-    backRim.userData = { isCoinRim: true };
-    backRim.castShadow = backRim.receiveShadow = true;
-    mesh.add(backRim);
-
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({
       map: this._coinGlowTex,
       blending: THREE.AdditiveBlending,
@@ -800,8 +816,13 @@ export class TrackManager {
   }
 
   _isWorldZInActiveView(worldZ) {
-    const aheadVisible = 85;
-    const behindVisible = 18;
+    const fogNear = this.scene?.fog?.near ?? 18;
+    const fogFar = this.scene?.fog?.far ?? 180;
+
+    // Consider the fog range as "visible" so retroactive clears don't pop.
+    // Add a small margin because the camera sits behind the player.
+    const aheadVisible = fogFar + 20;
+    const behindVisible = Math.max(18, fogNear + 6);
     return worldZ >= this._playerZ - aheadVisible && worldZ <= this._playerZ + behindVisible;
   }
 
@@ -968,11 +989,7 @@ export class TrackManager {
     const radius = 1.08;
     const sphere = new THREE.Mesh(
       new THREE.SphereGeometry(radius, 24, 16),
-      new THREE.MeshStandardMaterial({
-        color: 0x7f54c9,
-        roughness: 0.55,
-        metalness: 0.08,
-      })
+      this._rustyMetalMat.clone()
     );
     sphere.position.set(obs.x, radius, obs.z);
     sphere.castShadow = sphere.receiveShadow = true;
@@ -1401,8 +1418,6 @@ export class TrackManager {
         this.applyContentToChunk(chunk, content, newZ);
         // after recycling chunk, possibly spawn roadside model for its new position
         this._maybeSpawnRoadsideForChunk(chunk);
-        // update baseChildCount so roadside (if spawned) becomes base for this recycled chunk
-        chunk.userData.baseChildCount = chunk.children.length;
 
         const clearList = this.spawnManager.getRetroactiveClearList();
         for (const entry of clearList) {
@@ -1413,7 +1428,8 @@ export class TrackManager {
     }
   }
 
-  _removeObstaclesInRange(chunk, entry) {
+  _removeObstaclesInRange(chunk, entry, options = {}) {
+    const ignoreActiveView = options.ignoreActiveView === true;
     const toRemove = [];
     for (const child of chunk.children) {
       if (child.userData?.type !== 'obstacle') continue;
@@ -1421,7 +1437,7 @@ export class TrackManager {
       const objWorldZ = chunk.position.z + child.position.z;
       const objLane   = child.userData.lane;
       if (objLane === undefined) continue;
-      if (this._isWorldZInActiveView(objWorldZ)) continue;
+      if (!ignoreActiveView && this._isWorldZInActiveView(objWorldZ)) continue;
       if (objLane === entry.trainLane && objWorldZ >= entry.clearStartZ && objWorldZ <= entry.clearEndZ) {
         toRemove.push(child);
       } else if ((entry.adjLanes || []).includes(objLane) && objWorldZ >= entry.bodyStartZ && objWorldZ <= entry.bodyEndZ) {
