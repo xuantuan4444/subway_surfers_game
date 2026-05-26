@@ -91,6 +91,7 @@ export class Player {
         this.returnTimer = 0;
         this.raycaster = new THREE.Raycaster();
         this.raycaster.far = 15;
+        this._groundRayOrigin = new THREE.Vector3();
         this.currentGroundY = 0;
         this.lastValidGroundY = 0;
         this.groundObjects = [];
@@ -98,6 +99,7 @@ export class Player {
         this.trainGraceTimer = 0;
         this.trainGraceTrainUuid = null;
         this._wasOnTrainBeforeJump = false;
+        this._currentPlatform = null;
 
         this.footstepTimer = 0;
         this.footstepInterval = 0.35;
@@ -107,6 +109,13 @@ export class Player {
 
         this._playingLandAnim = false;
         this._isDying = false;
+    }
+
+    _getPlatformMotion(object) {
+        if (!object?.userData?.walkableProfile) return null;
+        const motion = object.parent?.userData?.trainMotion;
+        if (!motion) return null;
+        return motion;
     }
 
     _initAnimations() {
@@ -318,6 +327,39 @@ export class Player {
         }
     }
 
+    _findBestGroundHit() {
+        let bestHit = null;
+        let bestScore = -Infinity;
+        const lead = Math.min(1.8, Math.max(0.6, this.forwardSpeed * 0.04));
+        const zOffsets = [0, -lead * 0.35, -lead * 0.7, -lead, 0.35];
+
+        for (const zOffset of zOffsets) {
+            this.raycaster.set(
+                this._groundRayOrigin.set(
+                    this.mesh.position.x,
+                    this.mesh.position.y + 4,
+                    this.mesh.position.z + zOffset
+                ),
+                new THREE.Vector3(0, -1, 0)
+            );
+            const hits = this.raycaster.intersectObjects(this.groundObjects, false);
+            for (const hit of hits) {
+                const isTrainSurface = hit.object?.userData?.walkableProfile?.kind === 'train';
+                const maxStepUp = isTrainSurface ? 1.35 : 0.95;
+                if (hit.point.y > this.mesh.position.y + maxStepUp) continue;
+                if (hit.point.y < this.mesh.position.y - 8) continue;
+
+                const score = hit.point.y * 10 - Math.abs(zOffset) * 0.2 - hit.distance * 0.01;
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestHit = hit;
+                }
+            }
+        }
+
+        return bestHit;
+    }
+
     update(delta, trackChunks) {
         if (this.mixer) this.mixer.update(delta);
 
@@ -343,30 +385,14 @@ export class Player {
 
         this.updateGroundObjects(trackChunks);
 
-        this.raycaster.set(
-            new THREE.Vector3(this.mesh.position.x, this.mesh.position.y + 3, this.mesh.position.z),
-            new THREE.Vector3(0, -1, 0)
-        );
-        const intersects = this.raycaster.intersectObjects(this.groundObjects, false);
+        const groundHit = this._findBestGroundHit();
         let foundGround = false;
         let detectedY = 0;
-        let closestDist = Infinity;
         let closestObject = null;
-        for (const hit of intersects) {
-            if (hit.point.y <= this.mesh.position.y + 1 && hit.distance < closestDist) {
-                if (this.isJumping && !this._wasOnTrainBeforeJump && !this.hasSneakers) {
-                    const profile = hit.object?.userData?.walkableProfile;
-                    if (profile?.kind === 'train') {
-                        const onFlatRoof = profile.rampLength <= 0 ||
-                            hit.point.y >= (profile.trainHeight ?? 4) - 0.1;
-                        if (onFlatRoof) continue;
-                    }
-                }
-                closestDist = hit.distance;
-                detectedY = hit.point.y;
-                foundGround = true;
-                closestObject = hit.object;
-            }
+        if (groundHit) {
+            detectedY = groundHit.point.y;
+            foundGround = true;
+            closestObject = groundHit.object;
         }
 
         this.isGrounded = foundGround;
@@ -374,11 +400,14 @@ export class Player {
         if (foundGround) {
             this.currentGroundY = detectedY;
             this.lastValidGroundY = detectedY;
+            this._currentPlatform = closestObject;
 
             if (closestObject?.userData?.walkableProfile?.kind === 'train') {
                 this.trainGraceTimer = 0.45;
                 this.trainGraceTrainUuid = closestObject.uuid;
             }
+        } else {
+            this._currentPlatform = null;
         }
         const targetY = this.currentGroundY;
 
@@ -400,6 +429,11 @@ export class Player {
         }
 
         const isOnGround = Math.abs(this.mesh.position.y - targetY) < 0.1 && !this.isJumping;
+        const platformMotion = isOnGround ? this._getPlatformMotion(this._currentPlatform) : null;
+        if (platformMotion) {
+            this.mesh.position.z += platformMotion.speed * delta;
+        }
+
         if (this._wasInAir && isOnGround) {
             const onTrain = closestObject?.userData?.walkableProfile?.kind === 'train';
             if (this.audio) this.audio.play(onTrain ? 'trainLanding' : 'landing', { volume: onTrain ? 0.4 : 0.25 });
@@ -462,6 +496,7 @@ export class Player {
         this.trainGraceTimer = 0;
         this.trainGraceTrainUuid = null;
         this._wasOnTrainBeforeJump = false;
+        this._currentPlatform = null;
         this.footstepTimer = 0;
         this.isGrounded = true;
         this.hasSneakers = false;

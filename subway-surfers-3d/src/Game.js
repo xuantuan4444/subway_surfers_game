@@ -12,7 +12,9 @@ export class Game {
   constructor() {
     this.clock = new THREE.Clock();
     this.score = 0;
+    this.coinCount = 0;
     this.currentState = 'intro';
+    this._stateBeforePause = null;
     this._prevChaserActive = false;
 
     this.scene = new THREE.Scene();
@@ -40,16 +42,47 @@ export class Game {
     this.chaser = new Chaser(this.scene);
 
     this.uiScore = document.getElementById('score');
-    this.uiLives = document.getElementById('lives');
+    this.uiCoinCount = document.getElementById('coin-count');
+    this.uiCoinValue = document.getElementById('coin-value');
+    this.uiPauseBtn = document.getElementById('pause-btn');
+    this.uiPauseMenu = document.getElementById('pause-menu');
+    this.uiContinueBtn = document.getElementById('continue-btn');
+    this.uiNewGameBtn = document.getElementById('new-game-btn');
+    this.uiQuitBtn = document.getElementById('quit-btn');
     this.uiGameOver = document.getElementById('game-over');
     this.uiFinalScore = document.getElementById('final-score');
+    this.uiFinalCoins = document.getElementById('final-coins');
     this.uiRestartBtn = document.getElementById('restart-btn');
+    this.uiGameOverQuitBtn = document.getElementById('game-over-quit-btn');
     this.uiIntroOverlay = document.getElementById('intro-overlay');
     this.uiPowerUpHud = document.getElementById('powerup-hud');
 
-    if (this.uiRestartBtn) this.uiRestartBtn.addEventListener('click', () => this.restart());
+    if (this.uiRestartBtn) this.uiRestartBtn.addEventListener('click', () => this.retryGame());
+    if (this.uiGameOverQuitBtn) this.uiGameOverQuitBtn.addEventListener('click', () => this.quitGameWindow());
+    if (this.uiPauseBtn) this.uiPauseBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.togglePause();
+    });
+    if (this.uiContinueBtn) this.uiContinueBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.resumeFromPause();
+    });
+    if (this.uiNewGameBtn) this.uiNewGameBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.startNewGameFromPause();
+    });
+    if (this.uiQuitBtn) this.uiQuitBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.quitToIntro();
+    });
 
     window.addEventListener('resize', () => this.onResize());
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Escape') {
+        e.preventDefault();
+        this.togglePause();
+      }
+    });
     this.updateUI();
 
     this._audioLoadPromise = this.audio.loadManifest({
@@ -94,6 +127,7 @@ export class Game {
     this._outroFrozen = false;
     this._shakeIntensity = 0;
     this._shakeOffset = new THREE.Vector3();
+    this._magnetScaleVec = new THREE.Vector3(1, 1, 1);
     this._setupIntro();
   }
 
@@ -114,6 +148,8 @@ export class Game {
     this._removeIntroListeners();
     this.currentState = 'intro';
     this.score = 0;
+    this.coinCount = 0;
+    this._stateBeforePause = null;
     this._playElapsed = 0;
     this.introTimer = 0;
     this.scoreMultiplier = 1;
@@ -128,6 +164,7 @@ export class Game {
     if (this.uiGameOver) this.uiGameOver.style.display = 'none';
 
     this.player.reset();
+    this.collision.reset();
     this.player.playStandAnimation();
 
     this.chaser.deactivate();
@@ -172,6 +209,7 @@ export class Game {
   _startGame() {
     if (this.currentState !== 'intro') return;
     this.currentState = 'transitioning';
+    this._stateBeforePause = null;
     this._transitionTimer = 0;
 
     this._removeIntroListeners();
@@ -180,6 +218,7 @@ export class Game {
 
     this.input.setEnabled(true);
     this.player.reset();
+    this.collision.reset();
     this.track.reset();
     this.chaser.playRunAnimation();
 
@@ -198,6 +237,43 @@ export class Game {
       }
     });
     this.clock.start();
+  }
+
+  togglePause() {
+    if (this.currentState === 'paused') {
+      this.resumeFromPause();
+      return;
+    }
+
+    if (this.currentState !== 'playing' && this.currentState !== 'transitioning') return;
+
+    this._stateBeforePause = this.currentState;
+    this.currentState = 'paused';
+    this.input.setEnabled(false);
+    this.updateUI();
+  }
+
+  resumeFromPause() {
+    if (this.currentState !== 'paused') return;
+    this.currentState = this._stateBeforePause || 'playing';
+    this._stateBeforePause = null;
+    this.input.setEnabled(true);
+    this.clock.getDelta();
+    this.updateUI();
+  }
+
+  startNewGameFromPause() {
+    if (this.currentState !== 'paused') return;
+    this.audio.stopMusic(0.2);
+    this._setupIntro();
+    this.updateUI();
+  }
+
+  quitToIntro() {
+    if (this.currentState !== 'paused') return;
+    this.audio.stopMusic(0.2);
+    this._setupIntro();
+    this.updateUI();
   }
 
   _startOutro() {
@@ -285,18 +361,48 @@ export class Game {
     this.animate();
   }
 
+  retryGame() {
+    this.audio.stopMusic(0.1);
+    this._setupIntro();
+    this.updateUI();
+    this._startGame();
+    this.animate();
+  }
+
+  quitGameWindow() {
+    this.audio.stopMusic(0.1);
+    window.open('', '_self');
+    window.close();
+    setTimeout(() => {
+      if (!document.hidden && this.currentState === 'game_over') {
+        this._setupIntro();
+        this.updateUI();
+        this.animate();
+      }
+    }, 250);
+  }
+
   updateUI() {
     if (this.uiScore) {
       let text = `Score: ${this.score}`;
       if (this.scoreMultiplier > 1) text += `  ×${this.scoreMultiplier}`;
       this.uiScore.textContent = text;
     }
+    if (this.uiCoinValue) this.uiCoinValue.textContent = this.coinCount;
     if (this.uiFinalScore) this.uiFinalScore.textContent = this.score;
-    if (this.uiLives) this.uiLives.textContent = this.chaser.active ? '❤️' : '❤️❤️';
+    if (this.uiFinalCoins) this.uiFinalCoins.textContent = this.coinCount;
+    if (this.uiPauseBtn) {
+      this.uiPauseBtn.classList.toggle('is-paused', this.currentState === 'paused');
+      this.uiPauseBtn.setAttribute('aria-pressed', this.currentState === 'paused' ? 'true' : 'false');
+      this.uiPauseBtn.title = this.currentState === 'paused' ? 'Continue' : 'Pause';
+      this.uiPauseBtn.setAttribute('aria-label', this.currentState === 'paused' ? 'Continue game' : 'Pause game');
+    }
+    if (this.uiPauseMenu) {
+      this.uiPauseMenu.style.display = this.currentState === 'paused' ? 'flex' : 'none';
+    }
 
     if (this.uiPowerUpHud) {
       const parts = [];
-      if (this.scoreMultiplier > 1) parts.push(`×${this.scoreMultiplier}`);
       if (this._magnetTimer > 0) parts.push(`🧲 ${Math.ceil(this._magnetTimer)}s`);
       if (this._sneakersTimer > 0) parts.push(`👟 ${Math.ceil(this._sneakersTimer)}s`);
       this.uiPowerUpHud.textContent = parts.join('  ');
@@ -309,6 +415,7 @@ export class Game {
     if (!skipSound) this.audio.play('death', { volume: 0.6 });
     if (this.uiGameOver) this.uiGameOver.style.display = 'flex';
     if (this.uiFinalScore) this.uiFinalScore.textContent = this.score;
+    if (this.uiFinalCoins) this.uiFinalCoins.textContent = this.coinCount;
   }
 
   animate() {
@@ -316,6 +423,11 @@ export class Game {
 
     requestAnimationFrame(() => this.animate());
     const delta = this.clock.getDelta();
+
+    if (this.currentState === 'paused') {
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
 
     if (this.currentState === 'intro') {
       this._updateIntro(delta);
@@ -355,6 +467,7 @@ export class Game {
     const collisionResult = this.collision.checkCollisions(this.player, this.track.chunks);
 
     if (collisionResult.coinsCollected > 0) {
+      this.coinCount += collisionResult.coinsCollected;
       this.score += collisionResult.coinsCollected * 10 * this.scoreMultiplier;
       this.updateUI();
       this.audio.play('coin', {
@@ -374,8 +487,10 @@ export class Game {
       this._magnetTimer -= delta;
       if (this._magnetTimer <= 0) {
         this._magnetTimer = 0;
+        this._resetMagnetCoinScales();
+      } else {
+        this._updateMagnet(delta);
       }
-      this._updateMagnet(delta);
     }
     if (this._sneakersTimer > 0) {
       this._sneakersTimer -= delta;
@@ -444,6 +559,11 @@ export class Game {
   }
 
   _activatePowerUp(type) {
+    if (type === POWERUP.RANDOM_TEAPOT) {
+      const randomPool = [POWERUP.SCORE_2X, POWERUP.MAGNET, POWERUP.SNEAKERS];
+      type = randomPool[Math.floor(Math.random() * randomPool.length)];
+    }
+
     const cfg = POWERUP_CONFIG[type];
     if (!cfg) return;
     switch (type) {
@@ -481,7 +601,28 @@ export class Game {
           const speed = Math.max(25, this.player.forwardSpeed + 10);
           child.position.x += (dx / dist) * speed * delta;
           child.position.z += (dz / dist) * speed * delta;
+          const scale = 1 + (1 - dist / radius) * 0.45;
+          this._magnetScaleVec.set(scale, scale, scale);
+          child.scale.lerp(this._magnetScaleVec, Math.min(1, 10 * delta));
+          child.userData.magnetScaled = true;
+        } else if (child.userData.magnetScaled) {
+          this._magnetScaleVec.set(1, 1, 1);
+          child.scale.lerp(this._magnetScaleVec, Math.min(1, 8 * delta));
+          if (Math.abs(child.scale.x - 1) < 0.02) {
+            child.scale.set(1, 1, 1);
+            child.userData.magnetScaled = false;
+          }
         }
+      });
+    }
+  }
+
+  _resetMagnetCoinScales() {
+    for (const chunk of this.track.chunks) {
+      chunk.traverse((child) => {
+        if (child.userData?.type !== 'coin' || !child.userData.magnetScaled) return;
+        child.scale.set(1, 1, 1);
+        child.userData.magnetScaled = false;
       });
     }
   }

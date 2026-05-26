@@ -5,6 +5,13 @@ import { DifficultyManager } from './DifficultyManager.js';
 
 const CAR_LENGTH = 20;
 const RAMP_LENGTH = 8;
+const MOVING_TRAIN_FORWARD_CLEARANCE = CHUNK.LENGTH + 24;
+const LOW_OBSTACLE_TYPES = new Set([
+  OBSTACLE.LOW_BARRIER,
+  OBSTACLE.WOOD_BOX,
+  OBSTACLE.LOW_HOLLOW_BARRIER,
+  OBSTACLE.LOW_SPHERE,
+]);
 
 export class SpawnManager {
   constructor() {
@@ -150,8 +157,9 @@ export class SpawnManager {
     // Multi-car train: cars * 20 units long. Ramp chỉ ở car đầu tiên.
     // Clearance: toàn bộ train + ramp + margin
     // Đồng thời xóa obstacle ở lane kế bên trong vùng train body (vì train lấn sang lane kế)
-    const CLEAR_BEFORE = 12;
-    const CLEAR_AFTER = 16;
+    const CLEAR_BEFORE = 18;
+    const CLEAR_AFTER = 24;
+    const MOVING_FORWARD_CLEARANCE = MOVING_TRAIN_FORWARD_CLEARANCE;
     for (const train of trains) {
       if (train.isMoving) continue;
       const carCount = train.cars || 1;
@@ -214,9 +222,9 @@ export class SpawnManager {
       this._trainExtents.push({
         lane: train.lane,
         clearStartZ: trainStartZ - CLEAR_BEFORE,
-        clearEndZ: trainEndZ + CLEAR_AFTER,
+        clearEndZ: trainEndZ + MOVING_FORWARD_CLEARANCE,
         bodyStartZ: trainStartZ,
-        bodyEndZ: trainEndZ,
+        bodyEndZ: trainEndZ + MOVING_FORWARD_CLEARANCE,
         chunkUuid: chunk.uuid,
       });
     }
@@ -227,9 +235,9 @@ export class SpawnManager {
       const halfLen = CAR_LENGTH / 2;
       const trainBaseZ = chunkZ + train.z;
       const bodyStartZ = trainBaseZ - halfLen - (carCount - 1) * CAR_LENGTH;
-      const bodyEndZ = trainBaseZ + halfLen + (train.isMoving ? 0 : RAMP_LENGTH);
-      const clearStartZ = bodyStartZ - 12;
-      const clearEndZ = bodyEndZ + 16;
+      const bodyEndZ = trainBaseZ + halfLen + (train.isMoving ? MOVING_FORWARD_CLEARANCE : RAMP_LENGTH);
+      const clearStartZ = bodyStartZ - CLEAR_BEFORE;
+      const clearEndZ = bodyEndZ + CLEAR_AFTER;
       const adjLanes = LaneUtils.getAdjacentLanes(train.lane);
       for (const [otherUuid, otherData] of Object.entries(this._currentChunkPatterns)) {
         if (otherUuid === chunk.uuid) continue;
@@ -281,7 +289,7 @@ export class SpawnManager {
     // Track action tags for consecutive-pattern conflict prevention
     for (const row of rows) {
       for (const obs of row.obstacles) {
-        if (obs.type === OBSTACLE.LOW_BARRIER) this._lastActionTags.push({ tag: 'jump', z: chunkZ + row.z });
+        if (LOW_OBSTACLE_TYPES.has(obs.type)) this._lastActionTags.push({ tag: 'jump', z: chunkZ + row.z });
         if (obs.type === OBSTACLE.HIGH_BARRIER) this._lastActionTags.push({ tag: 'slide', z: chunkZ + row.z });
       }
     }
@@ -437,8 +445,10 @@ export class SpawnManager {
           );
           const carCount = train ? (train.cars || 1) : 1;
           // Block full train extent from rear past last car to front past ramp
-          const frontExtent = 10 + RAMP_LENGTH;
-          const rearExtent = 10 + (carCount - 1) * CAR_LENGTH;
+          frontExtent = obs.type === OBSTACLE.MOVING_TRAIN
+            ? MOVING_TRAIN_FORWARD_CLEARANCE
+            : 10 + RAMP_LENGTH;
+          rearExtent = 10 + (carCount - 1) * CAR_LENGTH;
           // Also block adjacent lanes near the train front (car front to past ramp)
           for (const adjLane of ALL_LANES) {
             if (adjLane === obs.lane) continue;
@@ -456,13 +466,13 @@ export class SpawnManager {
     for (const train of trains) {
       const worldZ = chunkZ + train.z;
       const carCount = train.cars || 1;
-      const frontExtent = 10 + (train.isMoving ? 0 : RAMP_LENGTH);
+      const frontExtent = train.isMoving ? MOVING_TRAIN_FORWARD_CLEARANCE : 10 + RAMP_LENGTH;
       const rearExtent = 10 + (carCount - 1) * CAR_LENGTH;
       blockedRanges[train.lane].push({ start: worldZ - rearExtent, end: worldZ + frontExtent });
       // Block adjacent lanes cho toàn bộ chiều dài train (body + ramp)
       // Vì train rộng 2.6 units, lấn 0.2 unit sang lane kế bên
       const trainStart = worldZ - 10 - (carCount - 1) * CAR_LENGTH;
-      const trainEnd = worldZ + (train.isMoving ? 10 : 10 + RAMP_LENGTH);
+      const trainEnd = worldZ + (train.isMoving ? MOVING_TRAIN_FORWARD_CLEARANCE : 10 + RAMP_LENGTH);
       for (const adjLane of ALL_LANES) {
         if (adjLane === train.lane) continue;
         blockedRanges[adjLane].push({ start: trainStart, end: trainEnd });
@@ -602,10 +612,10 @@ export class SpawnManager {
 
   _pickPowerUpType() {
     const roll = Math.random();
+    if (roll < 0.25) return POWERUP.RANDOM_TEAPOT;
     if (roll < 0.55) return POWERUP.SCORE_2X;
-    if (roll < 0.75) return POWERUP.MAGNET;
-    if (roll < 0.95) return POWERUP.SNEAKERS;
-    return POWERUP.SCORE_4X;
+    if (roll < 0.78) return POWERUP.MAGNET;
+    return POWERUP.SNEAKERS;
   }
 
   _placePowerUps(chunkZ, coins) {

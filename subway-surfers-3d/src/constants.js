@@ -8,6 +8,9 @@ export const LANE = {
 
 export const OBSTACLE = {
   LOW_BARRIER: 'low_barrier',
+  WOOD_BOX: 'wood_box',
+  LOW_HOLLOW_BARRIER: 'low_hollow_barrier',
+  LOW_SPHERE: 'low_sphere',
   HIGH_BARRIER: 'high_barrier',
   STATIC_TRAIN: 'static_train',
   MOVING_TRAIN: 'moving_train',
@@ -152,6 +155,7 @@ export const POWERUP = {
   SCORE_4X: 'score_4x',
   MAGNET: 'magnet',
   SNEAKERS: 'sneakers',
+  RANDOM_TEAPOT: 'random_teapot',
 };
 
 export const POWERUP_CONFIG = {
@@ -159,10 +163,14 @@ export const POWERUP_CONFIG = {
   [POWERUP.SCORE_4X]: { duration: 12, color: 0xaa44ff, emissive: 0x7700dd },
   [POWERUP.MAGNET]:   { duration: 10, color: 0x4488ff, emissive: 0x0044ff },
   [POWERUP.SNEAKERS]: { duration: 10, color: 0x44ff44, emissive: 0x00cc00 },
+  [POWERUP.RANDOM_TEAPOT]: { duration: 0, color: 0x9ee9ff, emissive: 0x45bde8 },
 };
 
 export const ACTION_DISTANCE = {
   LOW_BARRIER: 4,
+  WOOD_BOX: 4,
+  LOW_HOLLOW_BARRIER: 4,
+  LOW_SPHERE: 4,
   HIGH_BARRIER: 4,
   LANE_SWITCH: 6,
   JUMP: 5,

@@ -13,9 +13,18 @@
 <body>
     <div id="ui-layer">
         <div id="hud-top">
-            <div id="score">Score: 0</div>
+            <button id="pause-btn" type="button" aria-label="Pause game" title="Pause">
+                <span class="pause-icon" aria-hidden="true">
+                    <span></span>
+                    <span></span>
+                </span>
+            </button>
             <div id="hud-right">
-                <div id="lives">❤️❤️</div>
+                <div id="score">Score: 0</div>
+                <div id="coin-count" aria-label="Coins collected">
+                    <span class="coin-hud-icon" aria-hidden="true"></span>
+                    <span id="coin-value">0</span>
+                </div>
                 <div id="powerup-hud"></div>
             </div>
         </div>
@@ -27,15 +36,39 @@
             </div>
         </div>
 
+        <div id="pause-menu">
+            <div id="pause-menu-panel">
+                <button class="pause-menu-btn" id="continue-btn" type="button">CONTINUE</button>
+                <button class="pause-menu-btn" id="new-game-btn" type="button">NEW GAME</button>
+                <button class="pause-menu-btn" id="quit-btn" type="button">QUIT</button>
+            </div>
+        </div>
+
         <div id="game-over">
             <div id="game-over-content">
-                <div id="game-over-icon">💥</div>
-                <h1>GAME OVER</h1>
-                <div id="final-score-wrapper">
-                    <p id="final-score-label">FINAL SCORE</p>
-                    <p id="final-score">0</p>
+                <div id="game-over-ribbon">GAME OVER</div>
+                <div id="game-over-stars" aria-hidden="true">
+                    <span class="game-over-star">★</span>
+                    <span class="game-over-star is-main">★</span>
+                    <span class="game-over-star">★</span>
                 </div>
-                <button id="restart-btn">CHƠI LẠI</button>
+                <div class="game-over-section">
+                    <p class="game-over-label">YOUR SCORE</p>
+                    <div class="game-over-pill score-pill">
+                        <span id="final-score">0</span>
+                    </div>
+                </div>
+                <div class="game-over-section">
+                    <p class="game-over-label">REWARDS</p>
+                    <div class="game-over-pill reward-pill">
+                        <span class="coin-hud-icon reward-coin-icon" aria-hidden="true"></span>
+                        <span id="final-coins">0</span>
+                    </div>
+                </div>
+                <div id="game-over-actions">
+                    <button class="game-over-btn quit-btn" id="game-over-quit-btn" type="button">Quit</button>
+                    <button class="game-over-btn retry-btn" id="restart-btn" type="button">RETRY</button>
+                </div>
             </div>
         </div>
     </div>

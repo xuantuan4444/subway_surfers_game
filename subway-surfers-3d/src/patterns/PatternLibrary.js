@@ -46,7 +46,10 @@ export class Pattern {
   }
 
   requiresJump() {
-    return this.hasActionType(OBSTACLE.LOW_BARRIER);
+    return this.hasActionType(OBSTACLE.LOW_BARRIER) ||
+      this.hasActionType(OBSTACLE.WOOD_BOX) ||
+      this.hasActionType(OBSTACLE.LOW_HOLLOW_BARRIER) ||
+      this.hasActionType(OBSTACLE.LOW_SPHERE);
   }
 
   requiresSlide() {
@@ -89,25 +92,32 @@ class PatternBuilder {
   }
 
   defineEasy() {
+    const lowObstacleVariants = [
+      { obstacle: OBSTACLE.WOOD_BOX, tag: 'wood_box' },
+      { obstacle: OBSTACLE.LOW_HOLLOW_BARRIER, tag: 'low_hollow_barrier' },
+      { obstacle: OBSTACLE.LOW_SPHERE, tag: 'low_sphere' },
+    ];
     const configs = [
-      { mask: [1, 0, 0], obstacle: OBSTACLE.LOW_BARRIER, action: 1, coin: [1, 2] },
-      { mask: [0, 1, 0], obstacle: OBSTACLE.LOW_BARRIER, action: 1, coin: [0, 2] },
-      { mask: [0, 0, 1], obstacle: OBSTACLE.LOW_BARRIER, action: 1, coin: [0, 1] },
+      { mask: [1, 0, 0], action: 1, coin: [1, 2] },
+      { mask: [0, 1, 0], action: 1, coin: [0, 2] },
+      { mask: [0, 0, 1], action: 1, coin: [0, 1] },
     ];
     for (const c of configs) {
-      const name = `EASY_${this._maskName(c.mask)}`;
-      this._index(new Pattern({
-        name,
-        laneMask: this._mask(...c.mask),
-        obstacles: {
-          [c.mask.indexOf(1)]: this._obs(c.obstacle),
-        },
-        category: PATTERN_CATEGORY.EASY,
-        minSpacing: 3,
-        actionCount: c.action,
-        coinLanes: c.coin,
-        tags: ['single_action', 'jump'],
-      }));
+      for (const variant of lowObstacleVariants) {
+        const name = `EASY_${this._maskName(c.mask)}_${variant.tag.toUpperCase()}`;
+        this._index(new Pattern({
+          name,
+          laneMask: this._mask(...c.mask),
+          obstacles: {
+            [c.mask.indexOf(1)]: this._obs(variant.obstacle),
+          },
+          category: PATTERN_CATEGORY.EASY,
+          minSpacing: 3,
+          actionCount: c.action,
+          coinLanes: c.coin,
+          tags: ['single_action', 'jump', variant.tag],
+        }));
+      }
     }
     return this;
   }
@@ -409,6 +419,9 @@ export class PatternValidator {
   static _actionFromObstacle(type) {
     switch (type) {
       case OBSTACLE.LOW_BARRIER: return 'jump';
+      case OBSTACLE.WOOD_BOX: return 'jump';
+      case OBSTACLE.LOW_HOLLOW_BARRIER: return 'jump_or_slide';
+      case OBSTACLE.LOW_SPHERE: return 'jump';
       case OBSTACLE.HIGH_BARRIER: return 'slide';
       case OBSTACLE.STATIC_TRAIN: return 'rooftop';
       case OBSTACLE.MOVING_TRAIN: return 'rooftop_moving';
