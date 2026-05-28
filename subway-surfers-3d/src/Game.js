@@ -23,6 +23,11 @@ export class Game {
 
     this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 200);
     this.camera.position.set(0, 7, 8);
+    this._rearViewCamera = new THREE.PerspectiveCamera(68, 1, 0.1, 200);
+
+    // First-person view flag and HUD hint
+    this.firstPerson = false;
+    this._createViewHint();
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -83,6 +88,14 @@ export class Game {
         this.togglePause();
       }
     });
+
+    // Toggle first-person view with 'V'
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'KeyV') {
+        this.firstPerson = !this.firstPerson;
+        this._updateViewHint();
+      }
+    });
     this.updateUI();
 
     this._audioLoadPromise = this.audio.loadManifest({
@@ -125,6 +138,7 @@ export class Game {
     this._aloIndex = 0;
     this._outroTimer = 0;
     this._outroFrozen = false;
+    this._deathCameraTimer = 0;
     this._shakeIntensity = 0;
     this._shakeOffset = new THREE.Vector3();
     this._magnetScaleVec = new THREE.Vector3(1, 1, 1);
@@ -280,6 +294,7 @@ export class Game {
     this.currentState = 'outro';
     this._outroTimer = 0;
     this._outroFrozen = false;
+    this._deathCameraTimer = 0;
     this.input.setEnabled(false);
 
     this._outroStartChaserZ = this.chaser.mesh.position.z;
@@ -290,6 +305,75 @@ export class Game {
     this._shakeIntensity = 0.6;
     this.audio.stopMusic(0.5);
     this.audio.play('death', { volume: 0.6 });
+  }
+
+  _updateFirstPersonCamera(gameCamPos, gameCamTarget) {
+    const isSliding = this.player.isSliding === true;
+    const eyeHeight = isSliding ? 1.15 : 2.9;
+    const forwardOffset = isSliding ? 0.35 : 0.8;
+    const lookAhead = isSliding ? 14 : 10;
+    const lookY = this.player.mesh.position.y + eyeHeight + (isSliding ? -0.45 : 0);
+
+    this.camera.position.set(
+      this.player.mesh.position.x,
+      this.player.mesh.position.y + eyeHeight,
+      this.player.mesh.position.z - forwardOffset
+    );
+    this.camera.lookAt(
+      this.player.mesh.position.x,
+      lookY,
+      this.player.mesh.position.z - lookAhead
+    );
+  }
+
+  _updateDeathCamera(delta) {
+    this._deathCameraTimer += delta;
+    const t = Math.min(1, this._deathCameraTimer / 0.9);
+    const ease = t * t * (3 - 2 * t);
+
+    const eyeHeight = 2.1;
+    const startLookY = this.player.mesh.position.y + eyeHeight;
+    const endLookY = this.chaser.mesh.position.y + 3.0;
+    const lookZ = THREE.MathUtils.lerp(
+      this.player.mesh.position.z - 9.5,
+      this.chaser.mesh.position.z + 0.8,
+      ease
+    );
+    const lookY = THREE.MathUtils.lerp(startLookY, endLookY, ease);
+    const cameraZ = THREE.MathUtils.lerp(
+      this.player.mesh.position.z - 0.8,
+      this.player.mesh.position.z + 0.55,
+      ease
+    );
+
+    this.camera.position.set(
+      this.player.mesh.position.x,
+      this.player.mesh.position.y + eyeHeight,
+      cameraZ
+    );
+    this.camera.lookAt(
+      this.player.mesh.position.x,
+      lookY,
+      lookZ
+    );
+  }
+
+  _updateRearViewCamera() {
+    const playerPos = this.player.mesh.position;
+    const chaserPos = this.chaser.mesh.position;
+    const isSliding = this.player.isSliding === true;
+    const eyeHeight = isSliding ? 1.25 : 3.05;
+
+    this._rearViewCamera.position.set(
+      playerPos.x,
+      playerPos.y + eyeHeight,
+      playerPos.z + 0
+    );
+    this._rearViewCamera.lookAt(
+      chaserPos.x,
+      chaserPos.y + 2.5,
+      chaserPos.z - 0.95
+    );
   }
 
   _updateOutro(delta) {
@@ -437,6 +521,9 @@ export class Game {
 
     if (this.currentState === 'outro') {
       this._updateOutro(delta);
+      if (this.firstPerson) {
+        this._updateDeathCamera(delta);
+      }
       this._applyShake(delta);
       this.renderer.render(this.scene, this.camera);
       return;
@@ -550,12 +637,35 @@ export class Game {
         this.chaser.active = false;
       }
     } else {
-      this.camera.position.copy(gameCamPos);
-      this.camera.lookAt(gameCamTarget);
+      if (this.firstPerson && this.currentState === 'playing') {
+        this._updateFirstPersonCamera(gameCamPos, gameCamTarget);
+      } else {
+        this.camera.position.copy(gameCamPos);
+        this.camera.lookAt(gameCamTarget);
+      }
     }
 
     this._applyShake(delta);
     this.renderer.render(this.scene, this.camera);
+
+    if (this.firstPerson && this.chaser.active && this.currentState === 'playing') {
+      this._updateRearViewCamera();
+
+      const insetWidth = 260;
+      const insetHeight = 380;
+      const margin = 10;
+      const x = window.innerWidth - insetWidth - margin;
+      const y = margin;
+
+      this.renderer.clearDepth();
+      this.renderer.setScissorTest(true);
+      this.renderer.setViewport(x, y, insetWidth, insetHeight);
+      this.renderer.setScissor(x, y, insetWidth, insetHeight);
+      this.renderer.render(this.scene, this._rearViewCamera);
+      this.renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
+      this.renderer.setScissor(0, 0, window.innerWidth, window.innerHeight);
+      this.renderer.setScissorTest(false);
+    }
   }
 
   _activatePowerUp(type) {
@@ -648,9 +758,33 @@ export class Game {
     }
   }
 
+  _createViewHint() {
+    this._viewHintEl = document.createElement('div');
+    this._viewHintEl.style.position = 'fixed';
+    this._viewHintEl.style.right = '12px';
+    this._viewHintEl.style.bottom = '12px';
+    this._viewHintEl.style.padding = '6px 10px';
+    this._viewHintEl.style.background = 'rgba(0,0,0,0.6)';
+    this._viewHintEl.style.color = '#fff';
+    this._viewHintEl.style.fontFamily = 'sans-serif';
+    this._viewHintEl.style.fontSize = '13px';
+    this._viewHintEl.style.borderRadius = '4px';
+    this._viewHintEl.style.zIndex = '9999';
+    this._viewHintEl.style.pointerEvents = 'none';
+    this._viewHintEl.textContent = 'View: Third-person (Press V)';
+    document.body.appendChild(this._viewHintEl);
+  }
+
+  _updateViewHint() {
+    if (!this._viewHintEl) return;
+    this._viewHintEl.textContent = this.firstPerson ? 'View: First-person (Press V)' : 'View: Third-person (Press V)';
+  }
+
   onResize() {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
+    this._rearViewCamera.aspect = 260 / 380;
+    this._rearViewCamera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
   }
 }
